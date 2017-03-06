@@ -7,3 +7,6 @@ authors = ["Scott Schroeder <scott19904@gmail.com>"]
 rocket = "0.2.2"
 rocket_codegen = "0.2.2"
 log = "0.3"
+redis = "0.5.3"
+rustc-serialize = "0.3"
+error-chain = "0.10.0"

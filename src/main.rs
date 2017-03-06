@@ -1,18 +1,36 @@
 #![feature(plugin)]
 #![plugin(rocket_codegen)]
+// `error_chain!` can recurse deeply
+#![recursion_limit = "1024"]
+
+extern crate redis;
+extern crate rustc_serialize;
+
+//use redis::{Client, Commands, Connection, RedisError, RedisResult, Value};
+//use redis::{ToRedisArgs, FromRedisValue};
+
+use rustc_serialize::json;
+
+use std::convert::From;
+
 
 extern crate rocket;
-
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate error_chain;
 
 use std::path::{PathBuf};
 use rocket::response::NamedFile;
 use std::env;
 use std::{thread, time};
 
+mod user;
+mod session;
+mod errors;
 
-mod storypoints;
+use errors::*;
+
 
 #[get("/")]
 fn index() -> &'static str {
@@ -28,10 +46,6 @@ fn current_dir() -> String {
     env::current_dir().unwrap().to_str().unwrap().to_owned()
 }
 
-#[get("/points")]
-fn points() -> String {
-    storypoints::points()
-}
 
 #[get("/sleep/<seconds>")]
 fn sleep(seconds: u64) -> String {
@@ -54,7 +68,6 @@ fn main() {
         index,
         files,
         current_dir,
-        points,
         sleep,
     ]).launch();
 }
