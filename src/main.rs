@@ -112,7 +112,7 @@ fn create_session() -> Result<JSON<Value>> {
 }
 
 #[get("/session/<session_id>")]
-fn lookup_session(session_id: String) -> Result<Option<JSON<Value>>> {
+fn lookup_session(session_id: String) -> Result<Option<JSON<session::PublicSession>>> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
@@ -122,10 +122,8 @@ fn lookup_session(session_id: String) -> Result<Option<JSON<Value>>> {
         Some(s) => {
             let query_string = format!("{}_*", s.session_id);
             let users = user::User::bulk_lookup(&query_string, &conn)?;
-            Ok(Some(JSON(json!({
-                "session_id": s.session_id,
-                "average": s.average,
-            }))))
+            let public_session = session::PublicSession::new(&s, &users);
+            Ok(Some(JSON(public_session)))
         },
         None => Ok(None)
     }

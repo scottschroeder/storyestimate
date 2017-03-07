@@ -15,12 +15,23 @@ pub struct Session {
     pub average: Option<f32>,
 }
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub struct PublicSession {
     pub session_id: String,
     pub average: Option<f32>,
     pub users: Vec<PublicUser>
+}
+
+impl PublicSession {
+    pub fn new(s: &Session, users: &Vec<User>) -> Self {
+
+        PublicSession {
+            session_id: s.session_id.clone(),
+            average: s.average.clone(),
+            users: users.iter().map(|u| PublicUser::from(u)).collect(),
+        }
+    }
 }
 
 impl Session {

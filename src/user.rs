@@ -13,7 +13,7 @@ pub enum VoteState {
     Visible(u32),
 }
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum PublicVoteState {
     Empty,
@@ -30,12 +30,27 @@ pub struct User {
     pub vote: VoteState,
 }
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PublicUser {
     pub nickname: String,
     pub vote_state: PublicVoteState,
     pub vote_amount: Option<u32>
+}
+
+impl<'a> From<&'a User> for PublicUser {
+    fn from(u: &User) -> PublicUser {
+        let (vote_state, vote_amount) = match u.vote {
+            VoteState::Empty => (PublicVoteState::Empty, None),
+            VoteState::Hidden(_) => (PublicVoteState::Hidden, None),
+            VoteState::Visible(x) => (PublicVoteState::Visible, Some(x)),
+        };
+        PublicUser{
+            nickname: u.nickname.clone(),
+            vote_state: vote_state,
+            vote_amount: vote_amount,
+        }
+    }
 }
 
 impl<'a> ToRedisArgs for &'a User {
