@@ -5,9 +5,10 @@
 
 extern crate redis;
 extern crate rustc_serialize;
+extern crate rand;
 
 //use redis::{Client, Commands, Connection, RedisError, RedisResult, Value};
-//use redis::{ToRedisArgs, FromRedisValue};
+use redis::{Client, Commands};
 
 use rustc_serialize::json;
 
@@ -16,37 +17,34 @@ use std::convert::From;
 
 extern crate rocket;
 #[macro_use]
+extern crate rocket_contrib;
+#[macro_use]
 extern crate log;
 #[macro_use]
 extern crate error_chain;
 
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use rocket::response::NamedFile;
+use rocket_contrib::{JSON, Value};
 use std::env;
 use std::{thread, time};
 
 mod user;
 mod session;
 mod errors;
+mod generator;
+mod redisutil;
 
 use errors::*;
+use redisutil::RedisBackend;
 
 
 #[get("/")]
 fn index() -> &'static str {
-    debug!("Debug Log");
-    info!("Info Log");
-    warn!("Warning Log");
-    error!("Error Log");
     "Hello, world!"
 }
 
-#[get("/cwd")]
-fn current_dir() -> String {
-    env::current_dir().unwrap().to_str().unwrap().to_owned()
-}
-
-
+// For testing, and making DDOS really easy
 #[get("/sleep/<seconds>")]
 fn sleep(seconds: u64) -> String {
     let sleep_time = time::Duration::from_secs(seconds);
@@ -54,20 +52,62 @@ fn sleep(seconds: u64) -> String {
     format!("Slept for {} seconds.", seconds)
 }
 
-#[get("/file/<file..>")]
-fn files(file: PathBuf) -> Option<NamedFile> {
-    //TODO: Replace unwrap with option
-    let fullpath = env::current_dir().unwrap().join("static/").join(file);
-    //let fullpath = Path::new("static").join(file);
+#[get("/static/<file..>")]
+fn files(file: PathBuf) -> Result<Option<NamedFile>> {
+    let fullpath = env::current_dir()?
+        .join("static/")
+        .join(file);
     info!("Full Path is: {:?}", fullpath.display());
-    NamedFile::open(fullpath).ok()
+    Ok(NamedFile::open(fullpath).ok())
+}
+
+#[post("/session")]
+fn create_session() -> Result<JSON<Value>> {
+    let client = Client::open("redis://127.0.0.1/")?;
+    let conn = client.get_connection()?;
+
+    let s = session::Session::new();
+    if s.exists(&conn)? {
+        bail!("Tried to create a session with id that already exists!");
+    }
+    let _: () = conn.set(s.unique_key(), &s)?;
+    Ok(JSON(json!({
+        "session_id": s.session_id,
+        "session_admin_token": s.session_admin_token,
+    })))
+}
+
+#[get("/session/<session_id>")]
+fn lookup_session(session_id: String) -> Result<Option<JSON<Value>>> {
+    let client = Client::open("redis://127.0.0.1/")?;
+    let conn = client.get_connection()?;
+
+    let possible_session = session::Session::lookup(session_id, &conn)?;
+
+    match possible_session {
+        Some(s) => Ok(Some(JSON(json!({
+                "session_id": s.session_id,
+                "average": s.average,
+        })))),
+        None => Ok(None)
+    }
+
+    // Ok(JSON(json!({
+    //     "session_id": s.session_id,
+    //     "session_admin_token": s.session_admin_token,
+    // })))
 }
 
 fn main() {
-    rocket::ignite().mount("/", routes![
-        index,
-        files,
-        current_dir,
-        sleep,
-    ]).launch();
+
+    // generator::show_string();
+    // return;
+    rocket::ignite()
+        .mount("/", routes![
+            index,
+            files,
+            create_session,
+            lookup_session,
+            sleep,
+        ]).launch();
 }

@@ -10,3 +10,9 @@ log = "0.3"
 redis = "0.5.3"
 rustc-serialize = "0.3"
 error-chain = "0.10.0"
+rand = "0.3"
+
+[dependencies.rocket_contrib]
+version = "0.2.2"
+default-features = false
+features = ["json"]

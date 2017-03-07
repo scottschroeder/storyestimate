@@ -15,8 +15,9 @@ pub enum VoteState {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct User {
     pub user_token: u32,
+    pub session_id: u32,
     pub nickname: String,
-    pub vote: VoteState
+    pub vote: VoteState,
 }
 
 impl ToRedisArgs for User {
@@ -38,6 +39,7 @@ impl User {
     pub fn new(name: &str) -> Self {
         User {
             user_token: 1,
+            session_id: 1,
             nickname: name.to_owned(),
             vote: VoteState::Empty,
         }
