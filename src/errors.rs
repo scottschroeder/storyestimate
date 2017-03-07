@@ -16,4 +16,10 @@ error_chain! {
         RedisError(RedisError);
         IOError(io::Error);
     }
+    errors {
+        RedisEmptyError(t: String) {
+            description("Could not find key in Redis")
+                display("missing key: '{}'", t)
+        }
+    }
 }

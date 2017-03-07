@@ -2,7 +2,7 @@ use redis::{ToRedisArgs, FromRedisValue, RedisError, RedisResult, Value};
 use rustc_serialize::json;
 
 use errors::*;
-use super::user::{User, VoteState};
+use super::user::{PublicUser, User, VoteState};
 use super::generator;
 use super::redisutil::RedisBackend;
 
@@ -13,6 +13,14 @@ pub struct Session {
     pub session_id: String,
     pub session_admin_token: String,
     pub average: Option<f32>,
+}
+
+#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Debug)]
+pub struct PublicSession {
+    pub session_id: String,
+    pub average: Option<f32>,
+    pub users: Vec<PublicUser>
 }
 
 impl Session {

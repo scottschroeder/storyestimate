@@ -1,8 +1,9 @@
 use redis::{Commands, Connection, FromRedisValue, Value};
 use super::errors::*;
 use rustc_serialize::{Decodable, json};
+use std::fmt::Debug;
 
-pub trait RedisBackend: Sized + Decodable {
+pub trait RedisBackend: Sized + Decodable + Debug {
     fn object_id(&self) -> String;
     fn object_name() -> String;
     fn unique_key(&self) -> String {
@@ -20,21 +21,36 @@ pub trait RedisBackend: Sized + Decodable {
         }
     }
 
-    fn lookup(id: String, conn: &Connection) -> Result<Option<Self>> {
+    fn lookup(id: &str, conn: &Connection) -> Result<Option<Self>> {
         let redis_key = format!("se_{}_{}", Self::object_name(), id);
+        Self::lookup_raw_key(&redis_key, conn)
+    }
+
+    fn lookup_raw_key(redis_key: &str, conn: &Connection) -> Result<Option<Self>> {
+        info!("Looking up: {}", redis_key);
         let value: Value = conn.get(redis_key)?;
         Self::deserialize(value)
     }
 
     // TODO: Fill this in once we have users to test with
-    fn bulk_lookup(pattern: String, conn: &Connection) -> Result<()>{
+    fn bulk_lookup(pattern: &str, conn: &Connection) -> Result<()>{
         let redis_key = format!("se_{}_{}", Self::object_name(), pattern);
-        let value: Vec<Value> = conn.keys(redis_key)?;
+        info!("redis-cli KEYS {}", redis_key);
+        let values: Vec<Value> = conn.keys(redis_key)?;
+        let keys: Vec<Self> = values.iter()
+            .map(|ref v| String::from_redis_value(&v)
+                 .chain_err(|| "Could not parse string from KEYS command")
+                 .and_then(|ref k| Self::lookup_raw_key(k, &conn))
+                 .and_then(|o| o.ok_or(ErrorKind::RedisEmptyError(pattern.to_owned()).into()))
+             )
+            .collect::<Result<Vec<Self>>>()?;
+
+        info!("Keys: {:?}", keys);
         Ok(())
     }
 
     fn deserialize(value: Value) -> Result<Option<Self>> {
-        debug!("Lookup Resulted in: {:?}", value);
+        info!("Lookup Resulted in: {:?}", value);
         let redis_string: Option<String> = match value {
             Value::Nil => None,
             Value::Data(data) => {

@@ -1,5 +1,7 @@
 use redis::{ToRedisArgs, FromRedisValue, RedisError, RedisResult, Value};
 use rustc_serialize::json;
+use super::redisutil::RedisBackend;
+use super::generator;
 
 use errors::*;
 
@@ -12,34 +14,52 @@ pub enum VoteState {
 }
 
 #[derive(RustcDecodable, RustcEncodable)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum PublicVoteState {
+    Empty,
+    Hidden,
+    Visible,
+}
+
+#[derive(RustcDecodable, RustcEncodable)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct User {
-    pub user_token: u32,
-    pub session_id: u32,
+    pub user_token: String,
+    pub session_id: String,
     pub nickname: String,
     pub vote: VoteState,
 }
 
-impl ToRedisArgs for User {
+#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub struct PublicUser {
+    pub nickname: String,
+    pub vote_state: PublicVoteState,
+    pub vote_amount: Option<u32>
+}
+
+impl<'a> ToRedisArgs for &'a User {
     fn to_redis_args(&self) -> Vec<Vec<u8>> {
         vec![json::encode(&self).unwrap().into_bytes()]
     }
 }
 
-impl FromRedisValue for User {
-    fn from_redis_value(v: &Value) -> RedisResult<Self> {
-        let string_repr: String = String::from_redis_value(v)?;
-        json::decode(&string_repr)
-            .chain_err(|| "Could not parse from string returned by redis")
-            .map_err(|e| RedisError::from(e))
+
+impl RedisBackend for User {
+    fn object_id(&self) -> String {
+        format!("{}_{}", self.session_id, self.nickname)
+    }
+
+    fn object_name() -> String {
+        "user".to_owned()
     }
 }
 
 impl User {
-    pub fn new(name: &str) -> Self {
+    pub fn new(session_id: &str, name: &str) -> Self {
         User {
-            user_token: 1,
-            session_id: 1,
+            user_token: generator::authtoken(),
+            session_id: session_id.into(),
             nickname: name.to_owned(),
             vote: VoteState::Empty,
         }
@@ -75,7 +95,7 @@ impl User {
 
 #[test]
 fn user_vote() {
-    let mut u = User::new("joe");
+    let mut u = User::new("1", "joe");
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     assert_eq!(u.vote, VoteState::Hidden(3));
@@ -83,7 +103,7 @@ fn user_vote() {
 
 #[test]
 fn user_vote_reveal() {
-    let mut u = User::new("joe");
+    let mut u = User::new("1", "joe");
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     u.reveal();
@@ -92,7 +112,7 @@ fn user_vote_reveal() {
 
 #[test]
 fn user_vote_clear() {
-    let mut u = User::new("joe");
+    let mut u = User::new("1", "joe");
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     u.reveal();
@@ -103,7 +123,7 @@ fn user_vote_clear() {
 
 #[test]
 fn user_dont_clear_hidden() {
-    let mut u = User::new("joe");
+    let mut u = User::new("1", "joe");
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     assert_eq!(u.vote, VoteState::Hidden(3));
@@ -113,7 +133,7 @@ fn user_dont_clear_hidden() {
 
 #[test]
 fn user_vote_reset() {
-    let mut u = User::new("joe");
+    let mut u = User::new("1", "joe");
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     u.reset();
