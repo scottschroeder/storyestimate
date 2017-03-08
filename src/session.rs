@@ -1,4 +1,4 @@
-use redis::{ToRedisArgs};
+use redis::ToRedisArgs;
 use rustc_serialize::json;
 
 use super::user::{PublicUser, User, VoteState};
@@ -31,7 +31,6 @@ pub struct PublicSession {
     pub average: Option<f32>,
     pub users: Vec<PublicUser>,
     pub state: SessionState,
-
 }
 
 fn choose_session_state(users: &Vec<User>) -> SessionState {

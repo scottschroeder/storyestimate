@@ -33,16 +33,17 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     }
 
     // TODO: Fill this in once we have users to test with
-    fn bulk_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>>{
+    fn bulk_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>> {
         let redis_key = format!("se_{}_{}", Self::object_name(), pattern);
         info!("redis-cli KEYS {}", redis_key);
         let values: Vec<Value> = conn.keys(redis_key)?;
         let results: Vec<Self> = values.iter()
-            .map(|ref v| String::from_redis_value(&v)
-                 .chain_err(|| "Could not parse string from KEYS command")
-                 .and_then(|ref k| Self::lookup_raw_key(k, &conn))
-                 .and_then(|o| o.ok_or(ErrorKind::RedisEmptyError(pattern.to_owned()).into()))
-             )
+            .map(|ref v| {
+                String::from_redis_value(&v)
+                    .chain_err(|| "Could not parse string from KEYS command")
+                    .and_then(|ref k| Self::lookup_raw_key(k, &conn))
+                    .and_then(|o| o.ok_or(ErrorKind::RedisEmptyError(pattern.to_owned()).into()))
+            })
             .collect::<Result<Vec<Self>>>()?;
 
         Ok(results)
@@ -55,7 +56,7 @@ pub trait RedisBackend: Sized + Decodable + Debug {
             Value::Data(data) => {
                 let s: String = String::from_redis_value(&Value::Data(data))?;
                 Some(s)
-            },
+            }
             _other => bail!("Unknown Redis Return Value: {:?}", _other),
         };
         if let Some(string_repr) = redis_string {
@@ -66,5 +67,4 @@ pub trait RedisBackend: Sized + Decodable + Debug {
             Ok(None)
         }
     }
-
 }

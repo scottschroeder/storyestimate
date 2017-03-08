@@ -1,4 +1,4 @@
-use redis::{ToRedisArgs};
+use redis::ToRedisArgs;
 use rustc_serialize::json;
 use super::redisutil::RedisBackend;
 use super::generator;
@@ -33,7 +33,7 @@ pub struct User {
 pub struct PublicUser {
     pub nickname: String,
     pub vote_state: PublicVoteState,
-    pub vote_amount: Option<u32>
+    pub vote_amount: Option<u32>,
 }
 
 impl<'a> From<&'a User> for PublicUser {
@@ -43,7 +43,7 @@ impl<'a> From<&'a User> for PublicUser {
             VoteState::Hidden(_) => (PublicVoteState::Hidden, None),
             VoteState::Visible(x) => (PublicVoteState::Visible, Some(x)),
         };
-        PublicUser{
+        PublicUser {
             nickname: u.nickname.clone(),
             vote_state: vote_state,
             vote_amount: vote_amount,

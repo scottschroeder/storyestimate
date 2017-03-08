@@ -24,7 +24,8 @@ extern crate error_chain;
 use std::path::PathBuf;
 use rocket::response::NamedFile;
 use rocket_contrib::{JSON, Value};
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 use std::env;
 use std::{thread, time};
 
@@ -40,13 +41,13 @@ use redisutil::RedisBackend;
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct VoteForm {
-    vote: u32
+    vote: u32,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct NameForm {
-    name: String
+    name: String,
 }
 
 #[get("/")]
@@ -64,7 +65,8 @@ fn sleep(seconds: u64) -> String {
 
 #[get("/static/<file..>")]
 fn files(file: PathBuf) -> Result<Option<NamedFile>> {
-    let fullpath = env::current_dir()?
+    let fullpath = env::current_dir()
+        ?
         .join("static/")
         .join(file);
     info!("Full Path is: {:?}", fullpath.display());
@@ -92,9 +94,9 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
                 "session_id": u.session_id,
                 "nickname": u.nickname,
             })))
-        },
+        }
         // TODO: should be 4xx or maybe 404?
-        None => bail!("Tried to create a user for a session that does not exist!")
+        None => bail!("Tried to create a user for a session that does not exist!"),
     }
 }
 
@@ -115,13 +117,13 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
                 Some(mut u) => {
                     u.vote(vote.0.vote);
                     let _: () = conn.set(u.unique_key(), &u)?;
-                },
+                }
                 None => bail!("Tried to cast a vote for a non-existent user!"),
             };
             Ok(())
-        },
+        }
         // TODO: should be 4xx or maybe 404?
-        None => bail!("Tried to cast a vote in a non-existent session!")
+        None => bail!("Tried to cast a vote in a non-existent session!"),
     }
 }
 
@@ -155,8 +157,8 @@ fn lookup_session(session_id: String) -> Result<Option<JSON<session::PublicSessi
             let users = user::User::bulk_lookup(&query_string, &conn)?;
             let public_session = session::PublicSession::new(&s, &users);
             Ok(Some(JSON(public_session)))
-        },
-        None => Ok(None)
+        }
+        None => Ok(None),
     }
 }
 
@@ -165,7 +167,8 @@ fn main() {
     // generator::show_string();
     // return;
     rocket::ignite()
-        .mount("/", routes![
+        .mount("/",
+               routes![
             index,
             files,
             create_user,
@@ -173,5 +176,6 @@ fn main() {
             create_session,
             lookup_session,
             sleep,
-        ]).launch();
+        ])
+        .launch();
 }
