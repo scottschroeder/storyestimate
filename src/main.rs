@@ -41,6 +41,12 @@ use redisutil::RedisBackend;
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
+struct VoteForm {
+    vote: u32
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 struct NameForm {
     name: String
 }
@@ -94,6 +100,32 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
     }
 }
 
+#[post("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
+fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<()> {
+    let client = Client::open("redis://127.0.0.1/")?;
+    let conn = client.get_connection()?;
+
+    let possible_session = session::Session::lookup(&session_id, &conn)?;
+
+    info!("Name Object: {:?}", name);
+    match possible_session {
+        Some(_) => {
+            let user_id = format!("{}_{}", session_id, name);
+            let possible_user = user::User::lookup(&user_id, &conn)?;
+            match possible_user {
+                Some(mut u) => {
+                    u.vote(vote.0.vote);
+                    let _: () = conn.set(u.unique_key(), &u)?;
+                },
+                None => bail!("Tried to cast a vote for a non-existent user!"),
+            };
+            Ok(())
+        },
+        // TODO: should be 4xx or maybe 404?
+        None => bail!("Tried to cast a vote in a non-existent session!")
+    }
+}
+
 #[post("/session")]
 fn create_session() -> Result<JSON<Value>> {
     let client = Client::open("redis://127.0.0.1/")?;
@@ -127,11 +159,6 @@ fn lookup_session(session_id: String) -> Result<Option<JSON<session::PublicSessi
         },
         None => Ok(None)
     }
-
-    // Ok(JSON(json!({
-    //     "session_id": s.session_id,
-    //     "session_admin_token": s.session_admin_token,
-    // })))
 }
 
 fn main() {
@@ -143,6 +170,7 @@ fn main() {
             index,
             files,
             create_user,
+            cast_vote,
             create_session,
             lookup_session,
             sleep,
