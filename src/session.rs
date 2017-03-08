@@ -16,19 +16,47 @@ pub struct Session {
 }
 
 #[derive(Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy)]
+pub enum SessionState {
+    Reset,
+    Vote,
+    Visible,
+    Dirty,
+}
+
+
+#[derive(Serialize, Deserialize)]
 #[derive(Debug)]
 pub struct PublicSession {
     pub session_id: String,
     pub average: Option<f32>,
-    pub users: Vec<PublicUser>
+    pub users: Vec<PublicUser>,
+    pub state: SessionState,
+
+}
+
+fn choose_session_state(users: &Vec<User>) -> SessionState {
+    let mut state = SessionState::Reset;
+    for user in users {
+        match (state, user.vote) {
+            (SessionState::Reset, VoteState::Empty) => state = SessionState::Vote,
+            (SessionState::Reset, VoteState::Hidden(_)) => state = SessionState::Vote,
+            (SessionState::Reset, VoteState::Visible(_)) => state = SessionState::Visible,
+            (SessionState::Vote, VoteState::Visible(_)) => return SessionState::Dirty,
+            (SessionState::Visible, VoteState::Empty) => return SessionState::Dirty,
+            (SessionState::Visible, VoteState::Hidden(_)) => return SessionState::Dirty,
+            _ => (),
+        }
+    }
+    state
 }
 
 impl PublicSession {
     pub fn new(s: &Session, users: &Vec<User>) -> Self {
-
         PublicSession {
             session_id: s.session_id.clone(),
             average: s.average.clone(),
+            state: choose_session_state(users),
             users: users.iter().map(|u| PublicUser::from(u)).collect(),
         }
     }

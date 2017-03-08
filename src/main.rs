@@ -100,6 +100,7 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
     }
 }
 
+//TODO: Should be a PATCH
 #[post("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
 fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<()> {
     let client = Client::open("redis://127.0.0.1/")?;
