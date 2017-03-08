@@ -10,8 +10,6 @@ extern crate rand;
 //use redis::{Client, Commands, Connection, RedisError, RedisResult, Value};
 use redis::{Client, Commands};
 
-use rustc_serialize::json;
-
 use std::convert::From;
 
 

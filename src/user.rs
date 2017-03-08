@@ -1,9 +1,7 @@
-use redis::{ToRedisArgs, FromRedisValue, RedisError, RedisResult, Value};
+use redis::{ToRedisArgs};
 use rustc_serialize::json;
 use super::redisutil::RedisBackend;
 use super::generator;
-
-use errors::*;
 
 #[derive(RustcDecodable, RustcEncodable)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]

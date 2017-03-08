@@ -1,10 +1,5 @@
 use rand::{self, Rng};
 
-pub fn show_string() {
-    let s = authtoken();
-    println!("random string: {}", s);
-}
-
 pub fn session_id() -> String {
     rand::thread_rng()
         .gen_ascii_chars()

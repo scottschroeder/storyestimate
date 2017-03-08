@@ -1,7 +1,6 @@
-use redis::{ToRedisArgs, FromRedisValue, RedisError, RedisResult, Value};
+use redis::{ToRedisArgs};
 use rustc_serialize::json;
 
-use errors::*;
 use super::user::{PublicUser, User, VoteState};
 use super::generator;
 use super::redisutil::RedisBackend;
