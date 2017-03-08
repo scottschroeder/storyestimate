@@ -119,8 +119,8 @@ fn unique_session_id() {
 #[test]
 fn take_votes_average() {
     let mut s = Session::new();
-    let mut u = User::new("joe");
-    let mut u2 = User::new("john");
+    let mut u = User::new("1", "joe");
+    let mut u2 = User::new("1", "john");
     u.vote(4);
     u2.vote(6);
     let mut users = vec![u, u2];
