@@ -40,6 +40,12 @@ use redisutil::RedisBackend;
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
+struct SessionStateForm {
+    state: session::SessionState,
+}
+
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 struct VoteForm {
     vote: u32,
 }
@@ -100,31 +106,21 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
     }
 }
 
-//TODO: Should be a PATCH
-#[post("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
+#[patch("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
 fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<()> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
-    let possible_session = session::Session::lookup(&session_id, &conn)?;
-
-    info!("Name Object: {:?}", name);
-    match possible_session {
-        Some(_) => {
-            let user_id = format!("{}_{}", session_id, name);
-            let possible_user = user::User::lookup(&user_id, &conn)?;
-            match possible_user {
-                Some(mut u) => {
-                    u.vote(vote.0.vote);
-                    let _: () = conn.set(u.unique_key(), &u)?;
-                }
-                None => bail!("Tried to cast a vote for a non-existent user!"),
-            };
-            Ok(())
+    let user_id = format!("{}_{}", session_id, name);
+    let possible_user = user::User::lookup(&user_id, &conn)?;
+    match possible_user {
+        Some(mut u) => {
+            u.vote(vote.0.vote);
+            let _: () = conn.set(u.unique_key(), &u)?;
         }
-        // TODO: should be 4xx or maybe 404?
-        None => bail!("Tried to cast a vote in a non-existent session!"),
-    }
+        None => bail!("Tried to cast a vote for a non-existent user!"),
+    };
+    Ok(())
 }
 
 #[post("/session")]
@@ -162,6 +158,35 @@ fn lookup_session(session_id: String) -> Result<Option<JSON<session::PublicSessi
     }
 }
 
+#[patch("/session/<session_id>", format = "application/json", data = "<state>")]
+fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<()> {
+    let client = Client::open("redis://127.0.0.1/")?;
+    let conn = client.get_connection()?;
+
+    let possible_session = session::Session::lookup(&session_id, &conn)?;
+
+    match possible_session {
+        Some(mut s) => {
+            let query_string = format!("{}_*", s.session_id);
+            let mut users = user::User::bulk_lookup(&query_string, &conn)?;
+            match state.0.state {
+                session::SessionState::Reset => s.reset(&mut users),
+                session::SessionState::Vote => s.clear(&mut users),
+                session::SessionState::Visible => s.take_votes(&mut users),
+                //TODO: This should be some 4xx error, maybe the same one if it couldn't be decoded
+                // Alternately, maybe there's some other task this can do?
+                session::SessionState::Dirty => bail!("Not a valid input!"),
+            }
+            for u in users {
+                let _: () = conn.set(u.unique_key(), &u)?;
+            }
+            let _: () = conn.set(s.unique_key(), &s)?;
+        }
+        None => bail!("Tried to update a non-existent session!"),
+    }
+    Ok(())
+}
+
 fn main() {
 
     // generator::show_string();
@@ -174,6 +199,7 @@ fn main() {
             create_user,
             cast_vote,
             create_session,
+            update_session,
             lookup_session,
             sleep,
         ])

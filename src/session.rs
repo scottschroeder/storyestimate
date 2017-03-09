@@ -15,7 +15,7 @@ pub struct Session {
 }
 
 #[derive(Serialize, Deserialize)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SessionState {
     Reset,
     Vote,
