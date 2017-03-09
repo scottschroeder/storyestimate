@@ -3,9 +3,16 @@ use super::errors::*;
 use rustc_serialize::{Decodable, json};
 use std::fmt::Debug;
 
+const DEFAULT_REDIS_TTL: usize = 60 * 60 * 24; // 1 day
+
 pub trait RedisBackend: Sized + Decodable + Debug {
     fn object_id(&self) -> String;
     fn object_name() -> String;
+
+    fn object_ttl() -> Option<usize> {
+        Some(DEFAULT_REDIS_TTL)
+    }
+
     fn unique_key(&self) -> String {
         Self::redis_key(&self.object_id())
     }
@@ -35,7 +42,6 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     }
 
     fn lookup_raw_key(redis_key: &str, conn: &Connection) -> Result<Option<Self>> {
-        info!("Looking up: {}", redis_key);
         let value: Value = conn.get(redis_key)?;
         Self::deserialize(value)
     }
@@ -43,7 +49,6 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     // TODO: Fill this in once we have users to test with
     fn bulk_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>> {
         let redis_key = Self::redis_key(pattern);
-        info!("redis-cli KEYS {}", redis_key);
         let values: Vec<Value> = conn.keys(redis_key)?;
         let results: Vec<Self> = values.iter()
             .map(|ref v| {
@@ -69,7 +74,6 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     }
 
     fn deserialize(value: Value) -> Result<Option<Self>> {
-        info!("Lookup Resulted in: {:?}", value);
         let redis_string: Option<String> = match value {
             Value::Nil => None,
             Value::Data(data) => {

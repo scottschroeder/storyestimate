@@ -19,4 +19,4 @@
 - Refactor: We instantiate a new redis client on every call.
 - API Cleanup: Move endpoints around under an `/api` and possibly doc the whole thing in a swagger spec.
 - PubSub & Websockets: Create an event for notifications on changes to a session.
-- Reap Sessions: If users don't helpfully cleanup, we should have timeouts on redis or something.
+- Reap Sessions: If users don't helpfully cleanup, we should have timeouts on redis or something. Use TTL to clear objects.
