@@ -123,6 +123,22 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
     Ok(())
 }
 
+#[delete("/session/<session_id>/user/<name>")]
+fn delete_user(session_id: String, name: String) -> Result<Option<()>> {
+    let client = Client::open("redis://127.0.0.1/")?;
+    let conn = client.get_connection()?;
+
+    let user_id = format!("{}_{}", session_id, name);
+    let possible_user = user::User::lookup(&user_id, &conn)?;
+    match possible_user {
+        Some(mut u) => {
+            u.delete(&conn)?;
+            Ok(Some(()))
+        }
+        None => Ok(None),
+    }
+}
+
 #[post("/session")]
 fn create_session() -> Result<JSON<Value>> {
     let client = Client::open("redis://127.0.0.1/")?;
@@ -198,6 +214,7 @@ fn main() {
             files,
             create_user,
             cast_vote,
+            delete_user,
             create_session,
             update_session,
             lookup_session,

@@ -7,7 +7,7 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     fn object_id(&self) -> String;
     fn object_name() -> String;
     fn unique_key(&self) -> String {
-        format!("se_{}_{}", Self::object_name(), self.object_id())
+        Self::redis_key(&self.object_id())
     }
     fn exists(&self, conn: &Connection) -> Result<bool> {
         let result: Value = conn.exists(self.unique_key())
@@ -21,9 +21,12 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         }
     }
 
+    fn redis_key(id: &str) -> String {
+        format!("se_{}_{}", Self::object_name(), id)
+    }
+
     fn lookup(id: &str, conn: &Connection) -> Result<Option<Self>> {
-        let redis_key = format!("se_{}_{}", Self::object_name(), id);
-        Self::lookup_raw_key(&redis_key, conn)
+        Self::lookup_raw_key(&Self::redis_key(id), conn)
     }
 
     fn lookup_raw_key(redis_key: &str, conn: &Connection) -> Result<Option<Self>> {
@@ -34,7 +37,7 @@ pub trait RedisBackend: Sized + Decodable + Debug {
 
     // TODO: Fill this in once we have users to test with
     fn bulk_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>> {
-        let redis_key = format!("se_{}_{}", Self::object_name(), pattern);
+        let redis_key = Self::redis_key(pattern);
         info!("redis-cli KEYS {}", redis_key);
         let values: Vec<Value> = conn.keys(redis_key)?;
         let results: Vec<Self> = values.iter()
@@ -47,6 +50,17 @@ pub trait RedisBackend: Sized + Decodable + Debug {
             .collect::<Result<Vec<Self>>>()?;
 
         Ok(results)
+    }
+
+    fn delete(&mut self, conn: &Connection) -> Result<()> {
+        match conn.del(self.unique_key())? {
+            Value::Int(1) => Ok(()),
+            err => {
+                bail!("Redis was unable to delete {}, got '{:?}'",
+                      self.unique_key(),
+                      err)
+            }
+        }
     }
 
     fn deserialize(value: Value) -> Result<Option<Self>> {
@@ -68,3 +82,5 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         }
     }
 }
+
+//pub fn destroy_session()
