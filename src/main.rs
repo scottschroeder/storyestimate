@@ -145,7 +145,7 @@ fn create_session() -> Result<JSON<Value>> {
     let conn = client.get_connection()?;
 
     let s = session::Session::new();
-    if s.exists(&conn)? {
+    if session::session_clean(&s.session_id, &conn)? {
         // TODO: we should probably just retry a few times
         bail!("Tried to create a session with id that already exists!");
     }
@@ -210,13 +210,14 @@ fn delete_session(session_id: String) -> Result<Option<()>> {
 
     let possible_session = session::Session::lookup(&session_id, &conn)?;
 
+    let query_string = format!("{}_*", session_id);
+    let users = user::User::bulk_lookup(&query_string, &conn)?;
+    for mut u in users {
+        u.delete(&conn)?
+    }
+
     match possible_session {
         Some(mut s) => {
-            let query_string = format!("{}_*", s.session_id);
-            let users = user::User::bulk_lookup(&query_string, &conn)?;
-            for mut u in users {
-                u.delete(&conn)?
-            }
             s.delete(&conn)?;
             Ok(Some(()))
         }

@@ -9,16 +9,21 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     fn unique_key(&self) -> String {
         Self::redis_key(&self.object_id())
     }
-    fn exists(&self, conn: &Connection) -> Result<bool> {
-        let result: Value = conn.exists(self.unique_key())
+
+    fn check_exists(id: &str, conn: &Connection) -> Result<bool> {
+        let result: Value = conn.exists(Self::redis_key(id))
             .chain_err(|| "Error communicating with Redis")?;
 
-        info!("Key Exists '{}': {:?}", self.unique_key(), result);
+        info!("Key Exists '{}': {:?}", Self::redis_key(id), result);
         match result {
             Value::Int(0) => Ok(false),
             Value::Int(1) => Ok(true),
             _ => bail!("Redis returned invalid type"),
         }
+    }
+
+    fn exists(&self, conn: &Connection) -> Result<bool> {
+        Self::check_exists(&self.object_id(), conn)
     }
 
     fn redis_key(id: &str) -> String {
@@ -82,5 +87,3 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         }
     }
 }
-
-//pub fn destroy_session()

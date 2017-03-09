@@ -1,10 +1,11 @@
-use redis::ToRedisArgs;
+use redis::{Connection, ToRedisArgs};
 use rustc_serialize::json;
 
 use super::user::{PublicUser, User, VoteState};
 use super::generator;
 use super::redisutil::RedisBackend;
 
+use super::errors::*;
 
 #[derive(RustcDecodable, RustcEncodable)]
 #[derive(Debug)]
@@ -31,6 +32,12 @@ pub struct PublicSession {
     pub average: Option<f32>,
     pub users: Vec<PublicUser>,
     pub state: SessionState,
+}
+
+pub fn session_clean(session_id: &str, conn: &Connection) -> Result<bool> {
+    let user_query = format!("{}_*", session_id);
+    Ok(!Session::check_exists(session_id, conn)? ||
+       User::bulk_lookup(&user_query, conn)?.is_empty())
 }
 
 fn choose_session_state(users: &Vec<User>) -> SessionState {
