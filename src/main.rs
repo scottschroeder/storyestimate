@@ -203,6 +203,27 @@ fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<(
     Ok(())
 }
 
+#[delete("/session/<session_id>")]
+fn delete_session(session_id: String) -> Result<Option<()>> {
+    let client = Client::open("redis://127.0.0.1/")?;
+    let conn = client.get_connection()?;
+
+    let possible_session = session::Session::lookup(&session_id, &conn)?;
+
+    match possible_session {
+        Some(mut s) => {
+            let query_string = format!("{}_*", s.session_id);
+            let users = user::User::bulk_lookup(&query_string, &conn)?;
+            for mut u in users {
+                u.delete(&conn)?
+            }
+            s.delete(&conn)?;
+            Ok(Some(()))
+        }
+        None => Ok(None),
+    }
+}
+
 fn main() {
 
     // generator::show_string();
@@ -218,6 +239,7 @@ fn main() {
             create_session,
             update_session,
             lookup_session,
+            delete_session,
             sleep,
         ])
         .launch();
