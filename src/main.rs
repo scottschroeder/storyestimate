@@ -225,9 +225,6 @@ fn delete_session(session_id: String) -> Result<Option<()>> {
 }
 
 fn main() {
-
-    // generator::show_string();
-    // return;
     rocket::ignite()
         .mount("/",
                routes![
