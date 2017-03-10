@@ -108,7 +108,9 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
         Some(_) => {
             let u = user::User::new(&session_id, &name.0.name);
             if u.exists(&conn)? {
-                bail!(ErrorKind::UserError("Tried to create a user with name that already exists!".to_owned()));
+                bail!(ErrorKind::UserError("Tried to create a user with name that already \
+                                            exists!"
+                    .to_owned()));
             }
             let _: () = conn.set(u.unique_key(), &u)?;
             Ok(JSON(json!({
@@ -117,7 +119,11 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
                 "nickname": u.nickname,
             })))
         }
-        None => bail!(ErrorKind::UserError("Tried to create a user for a session that does not exist!".to_owned())),
+        None => {
+            bail!(ErrorKind::UserError(
+                "Tried to create a user for a session that does not exist!".to_owned()
+            ))
+        }
     }
 }
 
@@ -133,7 +139,9 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
             u.vote(vote.0.vote);
             let _: () = conn.set(u.unique_key(), &u)?;
         }
-        None => bail!(ErrorKind::UserError("Tried to cast a vote for a non-existent user!".to_owned())),
+        None => {
+            bail!(ErrorKind::UserError("Tried to cast a vote for a non-existent user!".to_owned()))
+        }
     };
     Ok(())
 }
@@ -206,7 +214,9 @@ fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<(
                 session::SessionState::Visible => s.take_votes(&mut users),
                 //TODO: This should be some 4xx error, maybe the same one if it couldn't be decoded
                 // Alternately, maybe there's some other task this can do?
-                session::SessionState::Dirty => bail!(ErrorKind::UserError("Tried to set the state to 'Dirty'".to_owned())),
+                session::SessionState::Dirty => {
+                    bail!(ErrorKind::UserError("Tried to set the state to 'Dirty'".to_owned()))
+                }
             }
             for u in users {
                 let _: () = conn.set(u.unique_key(), &u)?;
