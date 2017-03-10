@@ -21,5 +21,9 @@ error_chain! {
             description("Could not find key in Redis")
                 display("missing key: '{}'", t)
         }
+        UserError(t: String) {
+            description("User attempted invalid operation")
+                display("{}", t)
+        }
     }
 }

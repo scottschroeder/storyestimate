@@ -24,6 +24,8 @@ extern crate error_chain;
 use std::path::PathBuf;
 use rocket::response::NamedFile;
 use rocket_contrib::{JSON, Value};
+use rocket::http::Status;
+
 #[macro_use]
 extern crate serde_derive;
 use std::env;
@@ -54,6 +56,21 @@ struct VoteForm {
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct NameForm {
     name: String,
+}
+
+use rocket::response::{Response, Responder};
+
+impl<'r> Responder<'r> for Error {
+    fn respond(self) -> std::result::Result<Response<'r>, Status> {
+        info!("This is a: {:?}", self);
+        let (message, status) = match self {
+            Error(ErrorKind::UserError(reason), _) => (reason, Status::BadRequest),
+            _ => (format!("{}", self), Status::InternalServerError),
+            //Error(err, _) => (err.display(), Status::InternalServerError),
+        };
+        warn!("Returning {:?}: {:?}", status, message);
+        Err(status)
+    }
 }
 
 #[get("/")]
@@ -91,8 +108,7 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
         Some(_) => {
             let u = user::User::new(&session_id, &name.0.name);
             if u.exists(&conn)? {
-                // TODO: This should be a 4xx
-                bail!("Tried to create a user with name that already exists!");
+                bail!(ErrorKind::UserError("Tried to create a user with name that already exists!".to_owned()));
             }
             let _: () = conn.set(u.unique_key(), &u)?;
             Ok(JSON(json!({
@@ -101,8 +117,7 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
                 "nickname": u.nickname,
             })))
         }
-        // TODO: should be 4xx or maybe 404?
-        None => bail!("Tried to create a user for a session that does not exist!"),
+        None => bail!(ErrorKind::UserError("Tried to create a user for a session that does not exist!".to_owned())),
     }
 }
 
@@ -118,7 +133,7 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
             u.vote(vote.0.vote);
             let _: () = conn.set(u.unique_key(), &u)?;
         }
-        None => bail!("Tried to cast a vote for a non-existent user!"),
+        None => bail!(ErrorKind::UserError("Tried to cast a vote for a non-existent user!".to_owned())),
     };
     Ok(())
 }
@@ -191,14 +206,14 @@ fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<(
                 session::SessionState::Visible => s.take_votes(&mut users),
                 //TODO: This should be some 4xx error, maybe the same one if it couldn't be decoded
                 // Alternately, maybe there's some other task this can do?
-                session::SessionState::Dirty => bail!("Not a valid input!"),
+                session::SessionState::Dirty => bail!(ErrorKind::UserError("Tried to set the state to 'Dirty'".to_owned())),
             }
             for u in users {
                 let _: () = conn.set(u.unique_key(), &u)?;
             }
             let _: () = conn.set(s.unique_key(), &s)?;
         }
-        None => bail!("Tried to update a non-existent session!"),
+        None => bail!(ErrorKind::UserError("Tried to update a non-existent session!".to_owned())),
     }
     Ok(())
 }

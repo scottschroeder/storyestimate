@@ -14,7 +14,6 @@
 
 
 ## Major TODOs
-- 5xx -> 4xx: Many errors which should be 4xx codes are coming out as 5xx currently.
 - Authorization: When POSTs are made, clients get a token for further use. We are not currently doing any auth.
 - Refactor: We instantiate a new redis client on every call.
 - API Cleanup: Move endpoints around under an `/api` and possibly doc the whole thing in a swagger spec.
