@@ -1,4 +1,4 @@
-use redis::{Commands, Connection, FromRedisValue, Value};
+use redis::{Commands, Connection, FromRedisValue, ToRedisArgs, Value};
 use super::errors::*;
 use rustc_serialize::{Decodable, json};
 use std::fmt::Debug;
@@ -89,5 +89,23 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         } else {
             Ok(None)
         }
+    }
+}
+
+// This magic is "Higher Rank Trait Bounds": https://doc.rust-lang.org/nomicon/hrtb.html
+
+pub fn save<T>(obj: &T, conn: &Connection) -> Result<()>
+    where T: RedisBackend,
+          for<'a> &'a T: ToRedisArgs
+{
+
+    let result: Value = match T::object_ttl() {
+        Some(ttl) => conn.set_ex(obj.unique_key(), obj, ttl),
+        None => conn.set(obj.unique_key(), obj),
+    }?;
+    match result {
+        Value::Okay => Ok(()),
+        _ => bail!("Tried to save {:?}, got result: {:?}", obj, result),
+
     }
 }

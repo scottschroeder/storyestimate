@@ -8,7 +8,7 @@ extern crate rustc_serialize;
 extern crate rand;
 
 //use redis::{Client, Commands, Connection, RedisError, RedisResult, Value};
-use redis::{Client, Commands};
+use redis::Client;
 
 use std::convert::From;
 
@@ -112,7 +112,8 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
                                             exists!"
                     .to_owned()));
             }
-            let _: () = conn.set(u.unique_key(), &u)?;
+            redisutil::save(&u, &conn)?;
+
             Ok(JSON(json!({
                 "user_token": u.user_token,
                 "session_id": u.session_id,
@@ -137,7 +138,7 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
     match possible_user {
         Some(mut u) => {
             u.vote(vote.0.vote);
-            let _: () = conn.set(u.unique_key(), &u)?;
+            redisutil::save(&u, &conn)?;
         }
         None => {
             bail!(ErrorKind::UserError("Tried to cast a vote for a non-existent user!".to_owned()))
@@ -172,7 +173,7 @@ fn create_session() -> Result<JSON<Value>> {
         // TODO: we should probably just retry a few times
         bail!("Tried to create a session with id that already exists!");
     }
-    let _: () = conn.set(s.unique_key(), &s)?;
+    redisutil::save(&s, &conn)?;
     Ok(JSON(json!({
         "session_id": s.session_id,
         "session_admin_token": s.session_admin_token,
@@ -219,9 +220,9 @@ fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<(
                 }
             }
             for u in users {
-                let _: () = conn.set(u.unique_key(), &u)?;
+                redisutil::save(&u, &conn)?;
             }
-            let _: () = conn.set(s.unique_key(), &s)?;
+            redisutil::save(&s, &conn)?;
         }
         None => bail!(ErrorKind::UserError("Tried to update a non-existent session!".to_owned())),
     }
