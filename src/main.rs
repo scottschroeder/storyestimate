@@ -8,7 +8,7 @@ extern crate rustc_serialize;
 extern crate rand;
 
 //use redis::{Client, Commands, Connection, RedisError, RedisResult, Value};
-use redis::Client;
+use redis::{ConnectionInfo, ConnectionAddr};
 
 use std::convert::From;
 
@@ -20,13 +20,19 @@ extern crate rocket_contrib;
 extern crate log;
 #[macro_use]
 extern crate error_chain;
+extern crate r2d2;
+extern crate r2d2_redis;
+extern crate num_cpus;
 
 use std::path::PathBuf;
 use rocket::response::NamedFile;
 use rocket_contrib::{JSON, Value};
 use rocket::http::Status;
-use rocket::Outcome;
+use rocket::{Outcome, State};
 use rocket::request::{self, Request, FromRequest};
+
+use r2d2_redis::RedisConnectionManager;
+type RedisPool = r2d2::Pool<r2d2_redis::RedisConnectionManager>;
 
 #[macro_use]
 extern crate serde_derive;
@@ -151,9 +157,11 @@ fn files(file: PathBuf) -> Result<Option<NamedFile>> {
 }
 
 #[post("/session/<session_id>/user", format = "application/json", data = "<name>")]
-fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn create_user(session_id: String,
+               name: JSON<NameForm>,
+               pool: State<RedisPool>)
+               -> Result<JSON<Value>> {
+    let conn = pool.get().unwrap();
 
     let possible_session = session::Session::lookup(&session_id, &conn)?;
 
@@ -183,9 +191,13 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
 }
 
 #[patch("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
-fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>, keys: APIKey) -> Result<()> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn cast_vote(session_id: String,
+             name: String,
+             vote: JSON<VoteForm>,
+             keys: APIKey,
+             pool: State<RedisPool>)
+             -> Result<()> {
+    let conn = pool.get().unwrap();
 
     let user_id = format!("{}_{}", session_id, name);
     let possible_user = user::User::lookup(&user_id, &conn)?;
@@ -206,20 +218,25 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>, keys: APIKe
 }
 
 #[delete("/session/<session_id>/user/<name>")]
-fn delete_user(session_id: String, name: String, keys: APIKey) -> Result<Option<()>> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn delete_user(session_id: String,
+               name: String,
+               keys: APIKey,
+               pool: State<RedisPool>)
+               -> Result<Option<()>> {
+    let conn = pool.get().unwrap();
 
     let user_id = format!("{}_{}", session_id, name);
     match user::User::lookup(&user_id, &conn)? {
         Some(mut u) => {
-            if !u.is_authorized(&keys.user_key){
+            if !u.is_authorized(&keys.user_key) {
                 let session_admin = match session::Session::lookup(&session_id, &conn)? {
                     Some(s) => s.is_authorized(&keys.session_key),
                     None => false,
                 };
-                if !session_admin{
-                    bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
+                if !session_admin {
+                    bail!(ErrorKind::UserForbidden(
+                        "User is not authorized for this user".to_owned()
+                    ))
                 }
             }
             u.delete(&conn)?;
@@ -230,9 +247,8 @@ fn delete_user(session_id: String, name: String, keys: APIKey) -> Result<Option<
 }
 
 #[post("/session")]
-fn create_session() -> Result<JSON<Value>> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn create_session(pool: State<RedisPool>) -> Result<JSON<Value>> {
+    let conn = pool.get().unwrap();
 
     let s = session::Session::new();
     if session::session_clean(&s.session_id, &conn)? {
@@ -247,9 +263,11 @@ fn create_session() -> Result<JSON<Value>> {
 }
 
 #[get("/session/<session_id>")]
-fn lookup_session(session_id: String, keys: APIKey) -> Result<Option<JSON<session::PublicSession>>> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn lookup_session(session_id: String,
+                  keys: APIKey,
+                  pool: State<RedisPool>)
+                  -> Result<Option<JSON<session::PublicSession>>> {
+    let conn = pool.get().unwrap();
 
     let possible_session = session::Session::lookup(&session_id, &conn)?;
 
@@ -278,14 +296,19 @@ fn lookup_session(session_id: String, keys: APIKey) -> Result<Option<JSON<sessio
 }
 
 #[patch("/session/<session_id>", format = "application/json", data = "<state>")]
-fn update_session(session_id: String, state: JSON<SessionStateForm>, keys: APIKey) -> Result<()> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn update_session(session_id: String,
+                  state: JSON<SessionStateForm>,
+                  keys: APIKey,
+                  pool: State<RedisPool>)
+                  -> Result<()> {
+    let conn = pool.get().unwrap();
 
     match session::Session::lookup(&session_id, &conn)? {
         Some(mut s) => {
             if !s.is_authorized(&keys.session_key) {
-                bail!(ErrorKind::UserForbidden("User is not authorized as session admin".to_owned()))
+                bail!(ErrorKind::UserForbidden(
+                    "User is not authorized as session admin".to_owned()
+                ))
             }
             let query_string = format!("{}_*", s.session_id);
             let mut users = user::User::bulk_lookup(&query_string, &conn)?;
@@ -310,9 +333,8 @@ fn update_session(session_id: String, state: JSON<SessionStateForm>, keys: APIKe
 }
 
 #[delete("/session/<session_id>")]
-fn delete_session(session_id: String, keys: APIKey) -> Result<Option<()>> {
-    let client = Client::open("redis://127.0.0.1/")?;
-    let conn = client.get_connection()?;
+fn delete_session(session_id: String, keys: APIKey, pool: State<RedisPool>) -> Result<Option<()>> {
+    let conn = pool.get().unwrap();
 
     let possible_session = session::Session::lookup(&session_id, &conn)?;
 
@@ -322,7 +344,9 @@ fn delete_session(session_id: String, keys: APIKey) -> Result<Option<()>> {
     match possible_session {
         Some(mut s) => {
             if !s.is_authorized(&keys.session_key) {
-                bail!(ErrorKind::UserForbidden("User is not authorized as session admin".to_owned()))
+                bail!(ErrorKind::UserForbidden(
+                    "User is not authorized as session admin".to_owned()
+                ))
             }
             for mut u in users {
                 u.delete(&conn)?
@@ -335,6 +359,19 @@ fn delete_session(session_id: String, keys: APIKey) -> Result<Option<()>> {
 }
 
 fn main() {
+    let cpus = num_cpus::get() as u32;
+    let redis_ctx = ConnectionInfo {
+        addr: Box::new(ConnectionAddr::Tcp("127.0.0.1".to_owned(), 6379)),
+        db: 0,
+        passwd: None,
+    };
+    //info!("Creating Redis Pool ({}x -> {:?})", cpus, redis_ctx);
+    let config = r2d2::Config::builder()
+        .pool_size(cpus)
+        .build();
+    let manager = RedisConnectionManager::new(redis_ctx).unwrap();
+    let pool = r2d2::Pool::new(config, manager).unwrap();
+
     rocket::ignite()
         .mount("/",
                routes![
@@ -349,5 +386,6 @@ fn main() {
             delete_session,
             sleep,
         ])
+        .manage(pool)
         .launch();
 }
