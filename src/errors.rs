@@ -25,5 +25,9 @@ error_chain! {
             description("User attempted invalid operation")
                 display("{}", t)
         }
+        UserForbidden(t: String) {
+            description("User attempted operation without proper credentials")
+                display("{}", t)
+        }
     }
 }

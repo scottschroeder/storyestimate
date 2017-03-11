@@ -14,7 +14,6 @@
 
 
 ## Major TODOs
-- Authorization: When POSTs are made, clients get a token for further use. We are not currently doing any auth.
 - Refactor: We instantiate a new redis client on every call.
 - API Cleanup: Move endpoints around under an `/api` and possibly doc the whole thing in a swagger spec.
 - PubSub & Websockets: Create an event for notifications on changes to a session.

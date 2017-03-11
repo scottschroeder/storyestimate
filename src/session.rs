@@ -4,6 +4,7 @@ use rustc_serialize::json;
 use super::user::{PublicUser, User, VoteState};
 use super::generator;
 use super::redisutil::RedisBackend;
+use super::auth::ObjectAuth;
 
 use super::errors::*;
 
@@ -64,6 +65,12 @@ impl PublicSession {
             state: choose_session_state(users),
             users: users.iter().map(|u| PublicUser::from(u)).collect(),
         }
+    }
+}
+
+impl ObjectAuth for Session {
+    fn object_token(&self) -> &String {
+        &self.session_admin_token
     }
 }
 

@@ -25,12 +25,15 @@ use std::path::PathBuf;
 use rocket::response::NamedFile;
 use rocket_contrib::{JSON, Value};
 use rocket::http::Status;
+use rocket::Outcome;
+use rocket::request::{self, Request, FromRequest};
 
 #[macro_use]
 extern crate serde_derive;
 use std::env;
 use std::{thread, time};
 
+mod auth;
 mod user;
 mod session;
 mod errors;
@@ -39,6 +42,8 @@ mod redisutil;
 
 use errors::*;
 use redisutil::RedisBackend;
+use auth::ObjectAuth;
+
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -58,6 +63,54 @@ struct NameForm {
     name: String,
 }
 
+#[derive(Serialize, Deserialize)]
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct APIKey {
+    session_key: Option<String>,
+    user_key: Option<String>,
+}
+
+enum GetOneOptions<T> {
+    None,
+    One(T),
+    Many,
+}
+
+fn get_only_one<T>(mut source_list: Vec<T>) -> GetOneOptions<T> {
+    let possible_item = source_list.pop();
+    if !source_list.is_empty() {
+        return GetOneOptions::Many;
+    }
+    match possible_item {
+        None => GetOneOptions::None,
+        Some(x) => GetOneOptions::One(x),
+    }
+}
+
+impl<'a, 'r> FromRequest<'a, 'r> for APIKey {
+    type Error = ();
+
+    fn from_request(request: &'a Request<'r>) -> request::Outcome<APIKey, ()> {
+        let session_keys: Vec<_> = request.headers().get("session-token").collect();
+        let session_key: Option<String> = match get_only_one(session_keys) {
+            GetOneOptions::None => None,
+            GetOneOptions::One(key) => Some(key.to_string()),
+            GetOneOptions::Many => return Outcome::Failure((Status::BadRequest, ())),
+        };
+        let user_keys: Vec<_> = request.headers().get("user-token").collect();
+        let user_key: Option<String> = match get_only_one(user_keys) {
+            GetOneOptions::None => None,
+            GetOneOptions::One(key) => Some(key.to_string()),
+            GetOneOptions::Many => return Outcome::Failure((Status::BadRequest, ())),
+        };
+
+        Outcome::Success(APIKey {
+            session_key: session_key,
+            user_key: user_key,
+        })
+    }
+}
+
 use rocket::response::{Response, Responder};
 
 impl<'r> Responder<'r> for Error {
@@ -65,6 +118,7 @@ impl<'r> Responder<'r> for Error {
         info!("This is a: {:?}", self);
         let (message, status) = match self {
             Error(ErrorKind::UserError(reason), _) => (reason, Status::BadRequest),
+            Error(ErrorKind::UserForbidden(reason), _) => (reason, Status::Forbidden),
             _ => (format!("{}", self), Status::InternalServerError),
             //Error(err, _) => (err.display(), Status::InternalServerError),
         };
@@ -129,7 +183,7 @@ fn create_user(session_id: String, name: JSON<NameForm>) -> Result<JSON<Value>> 
 }
 
 #[patch("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
-fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<()> {
+fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>, keys: APIKey) -> Result<()> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
@@ -137,8 +191,12 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
     let possible_user = user::User::lookup(&user_id, &conn)?;
     match possible_user {
         Some(mut u) => {
-            u.vote(vote.0.vote);
-            redisutil::save(&u, &conn)?;
+            if u.is_authorized(&keys.user_key) {
+                u.vote(vote.0.vote);
+                redisutil::save(&u, &conn)?;
+            } else {
+                bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
+            }
         }
         None => {
             bail!(ErrorKind::UserError("Tried to cast a vote for a non-existent user!".to_owned()))
@@ -148,14 +206,22 @@ fn cast_vote(session_id: String, name: String, vote: JSON<VoteForm>) -> Result<(
 }
 
 #[delete("/session/<session_id>/user/<name>")]
-fn delete_user(session_id: String, name: String) -> Result<Option<()>> {
+fn delete_user(session_id: String, name: String, keys: APIKey) -> Result<Option<()>> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
     let user_id = format!("{}_{}", session_id, name);
-    let possible_user = user::User::lookup(&user_id, &conn)?;
-    match possible_user {
+    match user::User::lookup(&user_id, &conn)? {
         Some(mut u) => {
+            if !u.is_authorized(&keys.user_key){
+                let session_admin = match session::Session::lookup(&session_id, &conn)? {
+                    Some(s) => s.is_authorized(&keys.session_key),
+                    None => false,
+                };
+                if !session_admin{
+                    bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
+                }
+            }
             u.delete(&conn)?;
             Ok(Some(()))
         }
@@ -181,7 +247,7 @@ fn create_session() -> Result<JSON<Value>> {
 }
 
 #[get("/session/<session_id>")]
-fn lookup_session(session_id: String) -> Result<Option<JSON<session::PublicSession>>> {
+fn lookup_session(session_id: String, keys: APIKey) -> Result<Option<JSON<session::PublicSession>>> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
@@ -192,21 +258,35 @@ fn lookup_session(session_id: String) -> Result<Option<JSON<session::PublicSessi
             let query_string = format!("{}_*", s.session_id);
             let users = user::User::bulk_lookup(&query_string, &conn)?;
             let public_session = session::PublicSession::new(&s, &users);
-            Ok(Some(JSON(public_session)))
+            let mut authorized = s.is_authorized(&keys.session_key);
+            if !authorized {
+                for u in users {
+                    if u.is_authorized(&keys.user_key) {
+                        authorized = true;
+                        break;
+                    }
+                }
+            }
+            if authorized {
+                Ok(Some(JSON(public_session)))
+            } else {
+                bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
+            }
         }
         None => Ok(None),
     }
 }
 
 #[patch("/session/<session_id>", format = "application/json", data = "<state>")]
-fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<()> {
+fn update_session(session_id: String, state: JSON<SessionStateForm>, keys: APIKey) -> Result<()> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
-    let possible_session = session::Session::lookup(&session_id, &conn)?;
-
-    match possible_session {
+    match session::Session::lookup(&session_id, &conn)? {
         Some(mut s) => {
+            if !s.is_authorized(&keys.session_key) {
+                bail!(ErrorKind::UserForbidden("User is not authorized as session admin".to_owned()))
+            }
             let query_string = format!("{}_*", s.session_id);
             let mut users = user::User::bulk_lookup(&query_string, &conn)?;
             match state.0.state {
@@ -230,7 +310,7 @@ fn update_session(session_id: String, state: JSON<SessionStateForm>) -> Result<(
 }
 
 #[delete("/session/<session_id>")]
-fn delete_session(session_id: String) -> Result<Option<()>> {
+fn delete_session(session_id: String, keys: APIKey) -> Result<Option<()>> {
     let client = Client::open("redis://127.0.0.1/")?;
     let conn = client.get_connection()?;
 
@@ -238,12 +318,15 @@ fn delete_session(session_id: String) -> Result<Option<()>> {
 
     let query_string = format!("{}_*", session_id);
     let users = user::User::bulk_lookup(&query_string, &conn)?;
-    for mut u in users {
-        u.delete(&conn)?
-    }
 
     match possible_session {
         Some(mut s) => {
+            if !s.is_authorized(&keys.session_key) {
+                bail!(ErrorKind::UserForbidden("User is not authorized as session admin".to_owned()))
+            }
+            for mut u in users {
+                u.delete(&conn)?
+            }
             s.delete(&conn)?;
             Ok(Some(()))
         }

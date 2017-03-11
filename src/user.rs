@@ -1,6 +1,7 @@
 use redis::ToRedisArgs;
 use rustc_serialize::json;
 use super::redisutil::RedisBackend;
+use super::auth::ObjectAuth;
 use super::generator;
 
 #[derive(RustcDecodable, RustcEncodable)]
@@ -57,6 +58,11 @@ impl<'a> ToRedisArgs for &'a User {
     }
 }
 
+impl ObjectAuth for User {
+    fn object_token(&self) -> &String {
+        &self.user_token
+    }
+}
 
 impl RedisBackend for User {
     fn object_id(&self) -> String {
