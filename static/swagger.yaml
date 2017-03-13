@@ -1,0 +1,349 @@
+swagger: '2.0'
+info:
+  title: StoryEstimates API
+  description: Team story point estimates made easy!
+  version: "0.0.1"
+# the domain of the service
+host: localhost:8000
+# array of all schemes that your API supports
+schemes:
+  - http
+# will be prefixed to all paths
+basePath: /api
+consumes:
+  - application/json
+produces:
+  - application/json
+securityDefinitions:
+  basicAuth:
+    type: basic
+    description: HTTP Basic Authentication. Works over `HTTP` and `HTTPS`
+
+paths:
+  /session:
+    post:
+      summary: Create a new session
+      description: |
+        All estimates happen within the context of a session. This endpoint is
+        used to create a new session id, so that users can start to join.
+      tags:
+        - Session
+      responses:
+        200:
+          description: Session Created
+          schema:
+            $ref: '#/definitions/NewSession'
+        401:
+          description: Caller did not provide authorization
+  /session/{session_id}:
+    get:
+      summary: View Session Data
+      description: View the entire contents of a session and all of its users.
+      parameters:
+        - $ref: '#/parameters/SessionID'
+      tags:
+        - Session
+      responses:
+        200:
+          description: Session Data
+          schema:
+            $ref: '#/definitions/SessionData'
+        404:
+          description: Session does not exist
+    patch:
+      summary: Perform actions on session
+      description: |
+        Alter the state of the session in order to take or clear votes.
+        Only session admins are able to perform this action.
+      parameters:
+        - $ref: '#/parameters/SessionID'
+        - $ref: '#/parameters/SessionPatch'
+      tags:
+        - Session
+      security:
+       - basicAuth: []
+      responses:
+        200:
+          description: Success
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: Session does not exist
+    delete:
+      summary: Destroy a Session
+      description: Remove the session and all users
+      parameters:
+        - $ref: '#/parameters/SessionID'
+      tags:
+        - Session
+      responses:
+        200:
+          description: Success
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: Session does not exist
+  /user:
+    post:
+      summary: Create a new user
+      description: |
+        Create a new user id and token pair. This user ID is used throughout
+        the rest of the application.
+      tags:
+        - User
+      parameters:
+        - $ref: '#/parameters/NewUserRequest'
+      responses:
+        200:
+          description: User Created Successfully
+          schema:
+            $ref: '#/definitions/NewUser'
+  /user/{user_id}:
+    delete:
+      summary: Delete a user
+      description: |
+        Delete a user ID and token
+      parameters:
+        - $ref: '#/parameters/UserID'
+      tags:
+        - User
+      responses:
+        200:
+          description: User deleted successfully
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: User did not exist
+
+  /session/{session_id}/user/{user_id}:
+    post:
+      summary: Join a user to a session
+      description: |
+        Add a user to a session to participate in voting. The users nickname will show
+        up as part of the session, and any votes will be counted.
+      tags:
+        - User
+        - Session
+      parameters:
+        - $ref: '#/parameters/SessionID'
+        - $ref: '#/parameters/UserID'
+      responses:
+        200:
+          description: User Created Successfully
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: User did not exist
+    patch:
+      summary: Submit a vote
+      description: Place a vote for a particular user in a particular session
+      parameters:
+        - $ref: '#/parameters/SessionID'
+        - $ref: '#/parameters/UserID'
+        - $ref: '#/parameters/UserVotePatch'
+      tags:
+        - User
+        - Session
+      responses:
+        200:
+          description: Success
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: User did not exist
+    delete:
+      summary: Kick a user
+      description: |
+        Removes a user from a session, but does not revoke their ID or token.
+        This action can be performed by either the user that is leaving the
+        session, or any session admin.
+      parameters:
+        - $ref: '#/parameters/SessionID'
+        - $ref: '#/parameters/UserID'
+      tags:
+        - User
+        - Session
+      responses:
+        200:
+          description: Success
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: User did not exist
+
+  /session/{session_id}/admin/{user_id}:
+    post:
+      summary: Grant admin privileges
+      description: |
+        Grant a user admin privileges on a session. This can only be performed by
+        current admins of the session.
+      tags:
+        - User
+        - Session
+      parameters:
+        - $ref: '#/parameters/SessionID'
+        - $ref: '#/parameters/UserID'
+      responses:
+        200:
+          description: Success
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: Session does not exist
+    delete:
+      summary: Revoke admin privileges
+      description: |
+        Revoke admin privileges from a user for a session. This can only be performed by
+        current admins of the session.
+      parameters:
+        - $ref: '#/parameters/SessionID'
+        - $ref: '#/parameters/UserID'
+      tags:
+        - User
+        - Session
+      responses:
+        200:
+          description: Success
+        401:
+          description: Caller did not provide authorization
+        403:
+          description: Caller provided invalid authorization
+        404:
+          description: Session does not exist
+
+
+parameters:
+  SessionID:
+    name: session_id
+    in: path
+    description: Session ID we want to view
+    required: true
+    type: string
+  SessionPatch:
+    name: body
+    in: body
+    description: State we want the session to be in
+    required: true
+    schema:
+      $ref: '#/definitions/SessionPatchBody'
+  UserID:
+    name: user_id
+    in: path
+    description: Users ID
+    required: true
+    type: string
+  UserVotePatch:
+    name: body
+    in: body
+    description: The vote for the user
+    required: true
+    schema:
+      $ref: '#/definitions/UserPatchBody'
+  NewUserRequest:
+    name: User data
+    in: body
+    description: Data needed to initialize the new user
+    required: true
+    schema:
+      $ref: '#/definitions/NewUserForm'
+
+definitions:
+  NewSession:
+    type: object
+    properties:
+      session_id:
+        type: string
+        description: The session id that is used between all users.
+  NewUserForm:
+    type: object
+    properties:
+      name:
+        type: string
+        description: The handle for this user
+  NewUser:
+    type: object
+    properties:
+      user_id:
+        type: string
+        description: The user ID that is used to refer to this user instance
+      user_token:
+        type: string
+        description: The token that the creator of the user will use to vote
+      nickname:
+        type: string
+        description: The handle for this user
+  SessionPatchBody:
+    type: object
+    properties:
+      state:
+        type: string
+        description: The current state of the session, either "Reset" (empty) "Vote" (Users voting) "Visible" (Vote has been taken), or "Dirty" (Vote has been taken, but users have begun to vote again)
+        enum:
+         - Reset
+         - Vote
+         - Visible
+  UserPatchBody:
+    type: object
+    properties:
+      vote:
+        type: integer
+        format: int
+        description: The value of the users vote
+  SessionData:
+    type: object
+    properties:
+      session_id:
+        type: string
+        description: The session id that is used between all users.
+      state:
+        type: string
+        description: The current state of the session, either "Reset" (empty) "Vote" (Users voting) "Visible" (Vote has been taken), or "Dirty" (Vote has been taken, but users have begun to vote again)
+        enum:
+         - Reset
+         - Vote
+         - Visible
+         - Dirty
+      average:
+        type:
+         - number
+         - 'null'
+        format: float
+        description: The average of all of the votes. This value is 'null' when the votes are hidden.
+      users:
+        type: array
+        description: all the users
+        items:
+          $ref: '#/definitions/UserData'
+  UserData:
+    type: object
+    properties:
+      nickname:
+        type: string
+        description: The users handle
+      vote_amount:
+        type:
+          - number
+          - 'null'
+        format: float
+        description: The users vote. This can be 'null' if either the user has not voted, or votes are hidden.
+      state:
+        type: string
+        description: Current state of the user's vote, either "Empty" (Has not voted), "Hidden" (Voted but not visible), or "Visible" (voted and visible)
+        enum:
+         - Empty
+         - Hidden
+         - Visible

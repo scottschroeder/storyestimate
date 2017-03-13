@@ -151,16 +151,19 @@ fn cast_vote(session_id: String,
              vote: JSON<VoteForm>,
              keys: APIKey,
              pool: State<RedisPool>)
-             -> Result<()> {
+             -> Result<Option<()>> {
     let conn = pool.get().unwrap();
 
-    let mut u = user::User::lookup_strict(&user_id, &conn)?;
+    let mut u = match user::User::lookup(&user_id, &conn)? {
+        Some(u) => u,
+        None => return Ok(None),
+    };
 
     if u.is_authorized(&keys) {
         u.vote(vote.0.vote);
         redisutil::save(&u, &conn)?;
         redisutil::update_session(&session_id, &conn)?;
-        Ok(())
+        Ok(Some(()))
     } else {
         bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
     }
@@ -251,21 +254,23 @@ fn grant_admin(session_id: String,
                user_id: String,
                keys: APIKey,
                pool: State<RedisPool>)
-               -> Result<()> {
+               -> Result<Option<()>> {
 
     let conn = pool.get().unwrap();
 
-    let u = user::User::lookup_strict(&user_id, &conn)?;
-    let s = session::Session::lookup_strict(&session_id, &conn)?;
+    let s = match session::Session::lookup(&session_id, &conn)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
     if is_admin(&keys, &s, &conn)? {
-        s.associate(&u.user_id, "admin", &conn)?;
+        s.associate(&user_id, "admin", &conn)?;
         redisutil::update_session(&session_id, &conn)?;
     } else {
         bail!(ErrorKind::UserForbidden(
             "User is not authorized as session admin".to_owned()
         ))
     }
-    Ok(())
+    Ok(Some(()))
 }
 
 #[delete("/session/<session_id>/admin/<user_id>")]
@@ -276,7 +281,10 @@ fn revoke_admin(session_id: String,
                 -> Result<Option<()>> {
     let conn = pool.get().unwrap();
 
-    let s = session::Session::lookup_strict(&session_id, &conn)?;
+    let s = match session::Session::lookup(&session_id, &conn)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
 
     if is_admin(&keys, &s, &conn)? {
         s.disassociate(&user_id, "admin", &conn)?;
