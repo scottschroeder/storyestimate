@@ -130,11 +130,11 @@ fn files(file: PathBuf) -> Result<Option<NamedFile>> {
 }
 
 #[post("/user", format = "application/json", data = "<name>")]
-fn create_user(name: JSON<NameForm>, pool: State<RedisPool>) -> Result<JSON<Value>> {
+fn create_user(name: Option<JSON<NameForm>>, pool: State<RedisPool>) -> Result<JSON<Value>> {
     let conn = pool.get().unwrap();
 
     info!("Name Object: {:?}", name);
-    let u = user::User::new(Some(&name.0.name));
+    let u = user::User::new(name.as_ref().map(|form| form.0.name.as_str()));
     redisutil::save(&u, &conn)?;
 
     Ok(JSON(json!({
@@ -142,6 +142,25 @@ fn create_user(name: JSON<NameForm>, pool: State<RedisPool>) -> Result<JSON<Valu
         "user_token": u.user_token,
         "nickname": u.nickname,
     })))
+}
+
+#[put("/user/<user_id>", format = "application/json", data = "<name>")]
+fn rename_user(user_id: String, name: Option<JSON<NameForm>>,
+                   keys: APIKey, pool: State<RedisPool>) -> Result<Option<()>> {
+    let conn = pool.get().unwrap();
+
+    let mut u = match user::User::lookup(&user_id, &conn)? {
+        Some(u) => u,
+        None => return Ok(None),
+    };
+
+    if u.is_authorized(&keys) {
+        u.nickname = name.map(|form| form.0.name);
+        redisutil::save(&u, &conn)?;
+        Ok(Some(()))
+    } else {
+        bail!(ErrorKind::UserForbidden("Caller is not authorized to delete user".to_owned()))
+    }
 }
 
 
@@ -417,6 +436,7 @@ fn main() {
         .mount("/api",
                routes![
             create_user,
+            rename_user,
             cast_vote,
             delete_user,
             create_session,

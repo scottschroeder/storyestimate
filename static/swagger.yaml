@@ -103,6 +103,20 @@ paths:
           schema:
             $ref: '#/definitions/NewUser'
   /user/{user_id}:
+    put:
+      summary: Rename user
+      description: |
+        Update an existing user ID with a new human readable name
+      tags:
+        - User
+      parameters:
+        - $ref: '#/parameters/UserID'
+        - $ref: '#/parameters/NewUserRequest'
+      responses:
+        200:
+          description: User Renamed Successfully
+          schema:
+            $ref: '#/definitions/NewUser'
     delete:
       summary: Delete a user
       description: |
@@ -257,7 +271,7 @@ parameters:
     name: User data
     in: body
     description: Data needed to initialize the new user
-    required: true
+    required: false
     schema:
       $ref: '#/definitions/NewUserForm'
 
