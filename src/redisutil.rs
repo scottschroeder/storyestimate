@@ -109,3 +109,16 @@ pub fn save<T>(obj: &T, conn: &Connection) -> Result<()>
 
     }
 }
+
+
+fn publish(channel: &str, msg: &str, conn: &Connection) -> Result<()> {
+    let result = conn.publish(channel, msg)?;
+    match result {
+        Value::Int(1) => Ok(()),
+        _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
+    }
+}
+
+pub fn update_session(session_id: &str, conn: &Connection) -> Result<()> {
+    publish("se_session_update", session_id, conn)
+}

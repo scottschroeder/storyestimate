@@ -175,6 +175,7 @@ fn create_user(session_id: String,
                     .to_owned()));
             }
             redisutil::save(&u, &conn)?;
+            redisutil::update_session(&session_id, &conn)?;
 
             Ok(JSON(json!({
                 "user_token": u.user_token,
@@ -206,6 +207,7 @@ fn cast_vote(session_id: String,
             if u.is_authorized(&keys.user_key) {
                 u.vote(vote.0.vote);
                 redisutil::save(&u, &conn)?;
+                redisutil::update_session(&session_id, &conn)?;
             } else {
                 bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
             }
@@ -240,6 +242,7 @@ fn delete_user(session_id: String,
                 }
             }
             u.delete(&conn)?;
+            redisutil::update_session(&session_id, &conn)?;
             Ok(Some(()))
         }
         None => Ok(None),
@@ -326,6 +329,7 @@ fn update_session(session_id: String,
                 redisutil::save(&u, &conn)?;
             }
             redisutil::save(&s, &conn)?;
+            redisutil::update_session(&session_id, &conn)?;
         }
         None => bail!(ErrorKind::UserError("Tried to update a non-existent session!".to_owned())),
     }
@@ -352,6 +356,7 @@ fn delete_session(session_id: String, keys: APIKey, pool: State<RedisPool>) -> R
                 u.delete(&conn)?
             }
             s.delete(&conn)?;
+            redisutil::update_session(&session_id, &conn)?;
             Ok(Some(()))
         }
         None => Ok(None),
