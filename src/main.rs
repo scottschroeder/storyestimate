@@ -145,8 +145,11 @@ fn create_user(name: Option<JSON<NameForm>>, pool: State<RedisPool>) -> Result<J
 }
 
 #[put("/user/<user_id>", format = "application/json", data = "<name>")]
-fn rename_user(user_id: String, name: Option<JSON<NameForm>>,
-                   keys: APIKey, pool: State<RedisPool>) -> Result<Option<()>> {
+fn rename_user(user_id: String,
+               name: Option<JSON<NameForm>>,
+               keys: APIKey,
+               pool: State<RedisPool>)
+               -> Result<Option<()>> {
     let conn = pool.get().unwrap();
 
     let mut u = match user::User::lookup(&user_id, &conn)? {
@@ -209,7 +212,7 @@ fn create_session(pool: State<RedisPool>, keys: APIKey) -> Result<JSON<Value>> {
     let conn = pool.get().unwrap();
 
     let s = session::Session::new();
-    if !session::session_clean(&s.session_id, &conn)? {
+    if !s.is_clean(&conn)? {
         // TODO: we should probably just retry a few times
         bail!("Tried to create a session with id that already exists!");
     }

@@ -11,6 +11,16 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     fn object_id(&self) -> String;
     fn object_name() -> String;
 
+    /// Check for the existence of the object as well as any association tables
+    fn is_clean(&self, conn: &Connection) -> Result<bool> {
+        if !self.exists(conn)? {
+            let pattern_key = format!("{}_*", Self::redis_associate_base_key(&self.object_id()));
+            Ok(Self::pattern_lookup(&pattern_key, conn)?.is_empty())
+        } else {
+            Ok(false)
+        }
+    }
+
     fn object_ttl() -> Option<usize> {
         Some(DEFAULT_REDIS_TTL)
     }
@@ -43,11 +53,11 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         format!("se_{}_{}", Self::object_name(), id)
     }
 
+    fn redis_associate_base_key(id: &str) -> String {
+        format!("se_associate_{}_{}", Self::object_name(), id)
+    }
     fn redis_associate_key(id: &str, relationship: &str) -> String {
-        format!("se_associate_{}_{}_{}",
-                Self::object_name(),
-                id,
-                relationship)
+        format!("{}_{}", Self::redis_associate_base_key(id), relationship)
     }
 
     fn lookup_strict(id: &str, conn: &Connection) -> Result<Self> {
@@ -66,8 +76,6 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         let value: Value = conn.get(redis_key)?;
         Self::deserialize(value)
     }
-
-    // TODO: Fill this in once we have users to test with
 
     fn pattern_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>> {
         let redis_key = Self::redis_key(pattern);
@@ -145,9 +153,9 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         let redis_key = self.unique_associate_key(relationship);
         let result: Value = conn.smembers(&redis_key)?;
         debug!("Associates({}) [{}]: {:?}",
-              self.object_id(),
-              relationship,
-              result);
+               self.object_id(),
+               relationship,
+               result);
         match result {
             Value::Bulk(value_vec) => Ok(String::from_redis_values(value_vec.as_slice())?),
             _ => bail!("Redis did not return expected set of strings: {:?}", result),
