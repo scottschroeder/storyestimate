@@ -91,7 +91,11 @@ impl Session {
                 _ => (),
             }
         }
-        self.average = Some(total as f32 / count as f32);
+        if count > 0 {
+            self.average = Some(total as f32 / count as f32);
+        } else {
+            self.average = None;
+        }
     }
 
     pub fn clear(&mut self, users: &mut Vec<User>) {
