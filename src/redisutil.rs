@@ -2,6 +2,8 @@ use redis::{Commands, Connection, FromRedisValue, ToRedisArgs, Value};
 use super::errors::*;
 use rustc_serialize::{Decodable, json};
 use std::fmt::Debug;
+use super::APIKey;
+use super::user;
 
 const DEFAULT_REDIS_TTL: usize = 60 * 60 * 24; // 1 day
 
@@ -15,6 +17,10 @@ pub trait RedisBackend: Sized + Decodable + Debug {
 
     fn unique_key(&self) -> String {
         Self::redis_key(&self.object_id())
+    }
+
+    fn unique_associate_key(&self, relationship: &str) -> String {
+        Self::redis_associate_key(&self.object_id(), relationship)
     }
 
     fn check_exists(id: &str, conn: &Connection) -> Result<bool> {
@@ -35,6 +41,18 @@ pub trait RedisBackend: Sized + Decodable + Debug {
 
     fn redis_key(id: &str) -> String {
         format!("se_{}_{}", Self::object_name(), id)
+    }
+
+    fn redis_associate_key(id: &str, relationship: &str) -> String {
+        format!("se_associate_{}_{}_{}", Self::object_name(), id, relationship)
+    }
+
+    fn lookup_strict(id: &str, conn: &Connection) -> Result<Self> {
+        let redis_key = Self::redis_key(id);
+        match Self::lookup_raw_key(&redis_key, conn)? {
+            Some(x) => Ok(x),
+            None => Err(ErrorKind::RedisEmptyError(format!("Could not find {}", redis_key)).into())
+        }
     }
 
     fn lookup(id: &str, conn: &Connection) -> Result<Option<Self>> {
@@ -90,6 +108,37 @@ pub trait RedisBackend: Sized + Decodable + Debug {
             Ok(None)
         }
     }
+
+
+    fn associate(&self, foreign: &str, relationship: &str, conn: &Connection) -> Result<()> {
+        let redis_key = self.unique_associate_key(relationship);
+        let result: Value = conn.sadd(&redis_key, foreign)?;
+        match result {
+            Value::Int(_) => Ok(()),
+            _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
+        }
+    }
+
+    fn get_associates(&self, relationship: &str, conn: &Connection) -> Result<Vec<String>> {
+        let redis_key = self.unique_associate_key(relationship);
+        let result: Value = conn.smembers(&redis_key)?;
+        info!("Associates: {:?}", result);
+        match result {
+            Value::Bulk(value_vec) => {
+                Ok(String::from_redis_values(value_vec.as_slice())?)
+            },
+            _ => bail!("Redis did not return expected set of strings: {:?}", result),
+        }
+    }
+
+    fn disassociate(&self, foreign: &str, relationship: &str, conn: &Connection) -> Result<()> {
+        let redis_key = self.unique_associate_key(relationship);
+        let result: Value = conn.srem(&redis_key, foreign)?;
+        match result {
+            Value::Int(_) => Ok(()),
+            _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
+        }
+    }
 }
 
 // This magic is "Higher Rank Trait Bounds": https://doc.rust-lang.org/nomicon/hrtb.html
@@ -110,11 +159,18 @@ pub fn save<T>(obj: &T, conn: &Connection) -> Result<()>
     }
 }
 
+pub fn check_token(key: &APIKey, conn: &Connection) -> Result<bool> {
+    match user::User::lookup(&key.user_id, &conn)? {
+        Some(u) => Ok(u.is_authorized(key)),
+        None => Ok(false),
+    }
+}
+
 
 fn publish(channel: &str, msg: &str, conn: &Connection) -> Result<()> {
     let result = conn.publish(channel, msg)?;
     match result {
-        Value::Int(1) => Ok(()),
+        Value::Int(_) => Ok(()),
         _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
     }
 }

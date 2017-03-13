@@ -1,8 +1,8 @@
 use redis::ToRedisArgs;
 use rustc_serialize::json;
 use super::redisutil::RedisBackend;
-use super::auth::ObjectAuth;
 use super::generator;
+use super::APIKey;
 
 #[derive(RustcDecodable, RustcEncodable)]
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
@@ -23,16 +23,18 @@ pub enum PublicVoteState {
 #[derive(RustcDecodable, RustcEncodable)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct User {
+    pub user_id: String,
     pub user_token: String,
-    pub session_id: String,
-    pub nickname: String,
+    pub nickname: Option<String>,
     pub vote: VoteState,
 }
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct PublicUser {
-    pub nickname: String,
+    pub user_id: String,
+    pub nickname: Option<String>,
+    pub is_admin: bool,
     pub vote_state: PublicVoteState,
     pub vote_amount: Option<u32>,
 }
@@ -45,7 +47,9 @@ impl<'a> From<&'a User> for PublicUser {
             VoteState::Visible(x) => (PublicVoteState::Visible, Some(x)),
         };
         PublicUser {
+            user_id: u.user_id.clone(),
             nickname: u.nickname.clone(),
+            is_admin: false,
             vote_state: vote_state,
             vote_amount: vote_amount,
         }
@@ -58,15 +62,9 @@ impl<'a> ToRedisArgs for &'a User {
     }
 }
 
-impl ObjectAuth for User {
-    fn object_token(&self) -> &String {
-        &self.user_token
-    }
-}
-
 impl RedisBackend for User {
     fn object_id(&self) -> String {
-        format!("{}_{}", self.session_id, self.nickname)
+        self.user_id.clone()
     }
 
     fn object_name() -> String {
@@ -75,11 +73,11 @@ impl RedisBackend for User {
 }
 
 impl User {
-    pub fn new(session_id: &str, name: &str) -> Self {
+    pub fn new(name: Option<&str>) -> Self {
         User {
+            user_id: generator::user_id(),
             user_token: generator::authtoken(),
-            session_id: session_id.into(),
-            nickname: name.to_owned(),
+            nickname: name.map(|s| s.to_owned()),
             vote: VoteState::Empty,
         }
     }
@@ -110,11 +108,19 @@ impl User {
     pub fn reset(&mut self) {
         self.vote = VoteState::Empty;
     }
+
+    pub fn is_authorized(&self, key: &APIKey) -> bool {
+        if let Some(ref user_token) = key.user_key {
+            self.user_id == key.user_id && self.user_token == *user_token
+        } else {
+            false
+        }
+    }
 }
 
 #[test]
 fn user_vote() {
-    let mut u = User::new("1", "joe");
+    let mut u = User::new(None);
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     assert_eq!(u.vote, VoteState::Hidden(3));
@@ -122,7 +128,7 @@ fn user_vote() {
 
 #[test]
 fn user_vote_reveal() {
-    let mut u = User::new("1", "joe");
+    let mut u = User::new(None);
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     u.reveal();
@@ -131,7 +137,7 @@ fn user_vote_reveal() {
 
 #[test]
 fn user_vote_clear() {
-    let mut u = User::new("1", "joe");
+    let mut u = User::new(None);
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     u.reveal();
@@ -142,7 +148,7 @@ fn user_vote_clear() {
 
 #[test]
 fn user_dont_clear_hidden() {
-    let mut u = User::new("1", "joe");
+    let mut u = User::new(None);
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     assert_eq!(u.vote, VoteState::Hidden(3));
@@ -152,7 +158,7 @@ fn user_dont_clear_hidden() {
 
 #[test]
 fn user_vote_reset() {
-    let mut u = User::new("1", "joe");
+    let mut u = User::new(None);
     assert_eq!(u.vote, VoteState::Empty);
     u.vote(3);
     u.reset();

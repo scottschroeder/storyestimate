@@ -1,6 +1,7 @@
 use rustc_serialize;
 use redis::{self, RedisError};
 use std::io;
+use hyper::error::Error as HyperError;
 
 
 impl From<Error> for RedisError {
@@ -15,6 +16,7 @@ error_chain! {
         Parse(rustc_serialize::json::DecoderError);
         RedisError(RedisError);
         IOError(io::Error);
+        HyperError(HyperError);
     }
     errors {
         RedisEmptyError(t: String) {

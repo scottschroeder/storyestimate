@@ -4,7 +4,6 @@ use rustc_serialize::json;
 use super::user::{PublicUser, User, VoteState};
 use super::generator;
 use super::redisutil::RedisBackend;
-use super::auth::ObjectAuth;
 
 use super::errors::*;
 
@@ -12,7 +11,6 @@ use super::errors::*;
 #[derive(Debug)]
 pub struct Session {
     pub session_id: String,
-    pub session_admin_token: String,
     pub average: Option<f32>,
 }
 
@@ -36,9 +34,7 @@ pub struct PublicSession {
 }
 
 pub fn session_clean(session_id: &str, conn: &Connection) -> Result<bool> {
-    let user_query = format!("{}_*", session_id);
-    Ok(!Session::check_exists(session_id, conn)? ||
-       User::bulk_lookup(&user_query, conn)?.is_empty())
+    Ok(!(Session::check_exists(session_id, conn)?))
 }
 
 fn choose_session_state(users: &Vec<User>) -> SessionState {
@@ -58,19 +54,17 @@ fn choose_session_state(users: &Vec<User>) -> SessionState {
 }
 
 impl PublicSession {
-    pub fn new(s: &Session, users: &Vec<User>) -> Self {
+    pub fn new(s: &Session, users: &Vec<User>, admins: &Vec<String>) -> Self {
         PublicSession {
             session_id: s.session_id.clone(),
             average: s.average.clone(),
             state: choose_session_state(users),
-            users: users.iter().map(|u| PublicUser::from(u)).collect(),
+            users: users.iter().map(|u| {
+                let mut public_user = PublicUser::from(u);
+                public_user.is_admin = admins.contains(&public_user.user_id);
+                public_user
+            }).collect(),
         }
-    }
-}
-
-impl ObjectAuth for Session {
-    fn object_token(&self) -> &String {
-        &self.session_admin_token
     }
 }
 
@@ -78,7 +72,6 @@ impl Session {
     pub fn new() -> Self {
         Session {
             session_id: generator::session_id(),
-            session_admin_token: generator::authtoken(),
             average: None,
         }
     }
@@ -143,13 +136,6 @@ fn create_session() {
 }
 
 #[test]
-fn unique_auth_token() {
-    let s1 = Session::new();
-    let s2 = Session::new();
-    assert!(s1.session_admin_token != s2.session_admin_token);
-}
-
-#[test]
 fn unique_session_id() {
     let s1 = Session::new();
     let s2 = Session::new();
@@ -159,8 +145,8 @@ fn unique_session_id() {
 #[test]
 fn take_votes_average() {
     let mut s = Session::new();
-    let mut u = User::new("1", "joe");
-    let mut u2 = User::new("1", "john");
+    let mut u = User::new(None);
+    let mut u2 = User::new(None);
     u.vote(4);
     u2.vote(6);
     let mut users = vec![u, u2];

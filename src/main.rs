@@ -6,6 +6,7 @@
 extern crate redis;
 extern crate rustc_serialize;
 extern crate rand;
+extern crate hyper;
 
 //use redis::{Client, Commands, Connection, RedisError, RedisResult, Value};
 use redis::{ConnectionInfo, ConnectionAddr};
@@ -39,7 +40,6 @@ extern crate serde_derive;
 use std::env;
 use std::{thread, time};
 
-mod auth;
 mod user;
 mod session;
 mod errors;
@@ -48,7 +48,6 @@ mod redisutil;
 
 use errors::*;
 use redisutil::RedisBackend;
-use auth::ObjectAuth;
 
 
 #[derive(Serialize, Deserialize)]
@@ -71,48 +70,29 @@ struct NameForm {
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct APIKey {
-    session_key: Option<String>,
+pub struct APIKey {
+    user_id: String,
     user_key: Option<String>,
-}
-
-enum GetOneOptions<T> {
-    None,
-    One(T),
-    Many,
-}
-
-fn get_only_one<T>(mut source_list: Vec<T>) -> GetOneOptions<T> {
-    let possible_item = source_list.pop();
-    if !source_list.is_empty() {
-        return GetOneOptions::Many;
-    }
-    match possible_item {
-        None => GetOneOptions::None,
-        Some(x) => GetOneOptions::One(x),
-    }
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for APIKey {
     type Error = ();
 
     fn from_request(request: &'a Request<'r>) -> request::Outcome<APIKey, ()> {
-        let session_keys: Vec<_> = request.headers().get("session-token").collect();
-        let session_key: Option<String> = match get_only_one(session_keys) {
-            GetOneOptions::None => None,
-            GetOneOptions::One(key) => Some(key.to_string()),
-            GetOneOptions::Many => return Outcome::Failure((Status::BadRequest, ())),
-        };
-        let user_keys: Vec<_> = request.headers().get("user-token").collect();
-        let user_key: Option<String> = match get_only_one(user_keys) {
-            GetOneOptions::None => None,
-            GetOneOptions::One(key) => Some(key.to_string()),
-            GetOneOptions::Many => return Outcome::Failure((Status::BadRequest, ())),
+        let user_auth: String = match request.headers().get_one("Authorization") {
+            Some(auth_data) => auth_data.to_string(),
+            None => return Outcome::Failure((Status::Unauthorized, ())),
         };
 
+        let base64_encoded_auth = user_auth.replace("Basic ", "");
+        let authdata: Basic = match Basic::from_str(&base64_encoded_auth) {
+            Ok(authdata) => authdata,
+            Err(_) => return Outcome::Failure((Status::Unauthorized, ())),
+        };
+        //Ok(format!("{:?} -> {:?}", keys, authdata))
         Outcome::Success(APIKey {
-            session_key: session_key,
-            user_key: user_key,
+            user_id: authdata.username,
+            user_key: authdata.password,
         })
     }
 }
@@ -138,12 +118,12 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-// For testing, and making DDOS really easy
-#[get("/sleep/<seconds>")]
-fn sleep(seconds: u64) -> String {
-    let sleep_time = time::Duration::from_secs(seconds);
-    thread::sleep(sleep_time);
-    format!("Slept for {} seconds.", seconds)
+use hyper::header::Basic;
+use std::str::FromStr;
+
+#[get("/test")]
+fn test(keys: APIKey) -> Result<String> {
+    Ok(format!("{:?}", keys))
 }
 
 #[get("/static/<file..>")]
@@ -156,112 +136,157 @@ fn files(file: PathBuf) -> Result<Option<NamedFile>> {
     Ok(NamedFile::open(fullpath).ok())
 }
 
-#[post("/session/<session_id>/user", format = "application/json", data = "<name>")]
-fn create_user(session_id: String,
-               name: JSON<NameForm>,
+#[post("/user", format = "application/json", data = "<name>")]
+fn create_user(name: JSON<NameForm>,
                pool: State<RedisPool>)
                -> Result<JSON<Value>> {
     let conn = pool.get().unwrap();
 
-    let possible_session = session::Session::lookup(&session_id, &conn)?;
-
     info!("Name Object: {:?}", name);
-    match possible_session {
-        Some(_) => {
-            let u = user::User::new(&session_id, &name.0.name);
-            if u.exists(&conn)? {
-                bail!(ErrorKind::UserError("Tried to create a user with name that already \
-                                            exists!"
-                    .to_owned()));
-            }
-            redisutil::save(&u, &conn)?;
-            redisutil::update_session(&session_id, &conn)?;
+    let u = user::User::new(Some(&name.0.name));
+    redisutil::save(&u, &conn)?;
 
-            Ok(JSON(json!({
-                "user_token": u.user_token,
-                "session_id": u.session_id,
-                "nickname": u.nickname,
-            })))
-        }
-        None => {
-            bail!(ErrorKind::UserError(
-                "Tried to create a user for a session that does not exist!".to_owned()
-            ))
-        }
-    }
+    Ok(JSON(json!({
+        "user_id": u.user_id,
+        "user_token": u.user_token,
+        "nickname": u.nickname,
+    })))
 }
 
-#[patch("/session/<session_id>/user/<name>", format = "application/json", data = "<vote>")]
+#[post("/session/<session_id>/user/<user_id>", format = "application/json")]
+fn join_session(session_id: String,
+             user_id: String,
+             keys: APIKey,
+             pool: State<RedisPool>)
+             -> Result<()> {
+
+    let conn = pool.get().unwrap();
+
+    let u = user::User::lookup_strict(&user_id, &conn)?;
+    let s = session::Session::lookup_strict(&session_id, &conn)?;
+    if u.is_authorized(&keys) {
+        s.associate(&u.user_id, "user", &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+    } else {
+        bail!(ErrorKind::UserForbidden("Caller is not authorized for this user".to_owned()))
+    }
+    Ok(())
+}
+
+#[patch("/session/<session_id>/user/<user_id>", format = "application/json", data = "<vote>")]
 fn cast_vote(session_id: String,
-             name: String,
+             user_id: String,
              vote: JSON<VoteForm>,
              keys: APIKey,
              pool: State<RedisPool>)
              -> Result<()> {
     let conn = pool.get().unwrap();
 
-    let user_id = format!("{}_{}", session_id, name);
-    let possible_user = user::User::lookup(&user_id, &conn)?;
-    match possible_user {
-        Some(mut u) => {
-            if u.is_authorized(&keys.user_key) {
-                u.vote(vote.0.vote);
-                redisutil::save(&u, &conn)?;
-                redisutil::update_session(&session_id, &conn)?;
-            } else {
-                bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
-            }
-        }
-        None => {
-            bail!(ErrorKind::UserError("Tried to cast a vote for a non-existent user!".to_owned()))
-        }
-    };
-    Ok(())
+    let mut u = user::User::lookup_strict(&user_id, &conn)?;
+
+    if u.is_authorized(&keys) {
+        u.vote(vote.0.vote);
+        redisutil::save(&u, &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+        Ok(())
+    } else {
+        bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
+    }
 }
 
-#[delete("/session/<session_id>/user/<name>")]
-fn delete_user(session_id: String,
-               name: String,
+#[delete("/session/<session_id>/user/<user_id>")]
+fn kick_user(session_id: String,
+               user_id: String,
                keys: APIKey,
                pool: State<RedisPool>)
                -> Result<Option<()>> {
     let conn = pool.get().unwrap();
 
-    let user_id = format!("{}_{}", session_id, name);
-    match user::User::lookup(&user_id, &conn)? {
-        Some(mut u) => {
-            if !u.is_authorized(&keys.user_key) {
-                let session_admin = match session::Session::lookup(&session_id, &conn)? {
-                    Some(s) => s.is_authorized(&keys.session_key),
-                    None => false,
-                };
-                if !session_admin {
-                    bail!(ErrorKind::UserForbidden(
-                        "User is not authorized for this user".to_owned()
-                    ))
-                }
-            }
-            u.delete(&conn)?;
-            redisutil::update_session(&session_id, &conn)?;
-            Ok(Some(()))
+    let u = match user::User::lookup(&user_id, &conn)? {
+        Some(u) => u,
+        None => return Ok(None)
+    };
+    let s = session::Session::lookup_strict(&session_id, &conn)?;
+
+    // If the caller is either the user or a session admin
+    let authorized = if u.user_id == keys.user_id {
+        if u.is_authorized(&keys) {
+            true
+        } else {
+            false
         }
-        None => Ok(None),
+    } else {
+        // The Caller is not the user, so check the token to be sure its valid
+        if redisutil::check_token(&keys, &conn)? {
+            let admins = s.get_associates("admin", &conn)?;
+            if admins.contains(&keys.user_id) {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        }
+    };
+
+    if authorized {
+        s.disassociate(&user_id, "user", &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+        Ok(Some(()))
+    } else {
+        bail!(ErrorKind::UserForbidden("Caller is not authorized to kick user".to_owned()))
     }
 }
 
+#[delete("/user/<user_id>")]
+fn delete_user(user_id: String,
+               keys: APIKey,
+               pool: State<RedisPool>)
+               -> Result<Option<()>> {
+    let conn = pool.get().unwrap();
+    Ok(Some(()))
+
+    // match user::User::lookup(&user_id, &conn)? {
+    //     Some(mut u) => {
+    //         if !u.is_authorized(&keys) {
+    //             let session_admin = match session::Session::lookup(&session_id, &conn)? {
+    //                 Some(s) => true,//s.is_authorized(&keys.session_key),
+    //                 None => false,
+    //             };
+    //             if !session_admin {
+    //                 bail!(ErrorKind::UserForbidden(
+    //                     "User is not authorized for this user".to_owned()
+    //                 ))
+    //             }
+    //         }
+    //         u.delete(&conn)?;
+    //         redisutil::update_session(&session_id, &conn)?;
+    //         Ok(Some(()))
+    //     }
+    //     None => Ok(None),
+    // }
+}
+
+// TODO remove the option, anyone creating a session should have a user
 #[post("/session")]
-fn create_session(pool: State<RedisPool>) -> Result<JSON<Value>> {
+fn create_session(pool: State<RedisPool>, o_keys: Option<APIKey>) -> Result<JSON<Value>> {
     let conn = pool.get().unwrap();
 
     let s = session::Session::new();
-    if session::session_clean(&s.session_id, &conn)? {
+    if !session::session_clean(&s.session_id, &conn)? {
         // TODO: we should probably just retry a few times
         bail!("Tried to create a session with id that already exists!");
     }
+
+    if let Some(keys) = o_keys {
+        if redisutil::check_token(&keys, &conn)? {
+            s.associate(&keys.user_id, "admin", &conn)?;
+        }
+    }
+
     redisutil::save(&s, &conn)?;
     Ok(JSON(json!({
         "session_id": s.session_id,
-        "session_admin_token": s.session_admin_token,
     })))
 }
 
@@ -278,11 +303,13 @@ fn lookup_session(session_id: String,
         Some(s) => {
             let query_string = format!("{}_*", s.session_id);
             let users = user::User::bulk_lookup(&query_string, &conn)?;
-            let public_session = session::PublicSession::new(&s, &users);
-            let mut authorized = s.is_authorized(&keys.session_key);
+            //let admins = s.get_associates("admins", &conn)?;
+            let admins = Vec::new();
+            let public_session = session::PublicSession::new(&s, &users, &admins);
+            let mut authorized = true;//s.is_authorized(&keys.session_key);
             if !authorized {
                 for u in users {
-                    if u.is_authorized(&keys.user_key) {
+                    if u.is_authorized(&keys) {
                         authorized = true;
                         break;
                     }
@@ -308,7 +335,7 @@ fn update_session(session_id: String,
 
     match session::Session::lookup(&session_id, &conn)? {
         Some(mut s) => {
-            if !s.is_authorized(&keys.session_key) {
+            if true {// !s.is_authorized(&keys.session_key) {
                 bail!(ErrorKind::UserForbidden(
                     "User is not authorized as session admin".to_owned()
                 ))
@@ -347,7 +374,7 @@ fn delete_session(session_id: String, keys: APIKey, pool: State<RedisPool>) -> R
 
     match possible_session {
         Some(mut s) => {
-            if !s.is_authorized(&keys.session_key) {
+            if true {// !s.is_authorized(&keys.session_key) {
                 bail!(ErrorKind::UserForbidden(
                     "User is not authorized as session admin".to_owned()
                 ))
@@ -381,15 +408,17 @@ fn main() {
         .mount("/",
                routes![
             index,
+            test,
             files,
             create_user,
+            join_session,
             cast_vote,
+            kick_user,
             delete_user,
             create_session,
             update_session,
             lookup_session,
             delete_session,
-            sleep,
         ])
         .manage(pool)
         .launch();
