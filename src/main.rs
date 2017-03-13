@@ -38,7 +38,6 @@ type RedisPool = r2d2::Pool<r2d2_redis::RedisConnectionManager>;
 #[macro_use]
 extern crate serde_derive;
 use std::env;
-use std::{thread, time};
 
 mod user;
 mod session;
@@ -153,25 +152,6 @@ fn create_user(name: JSON<NameForm>,
     })))
 }
 
-#[post("/session/<session_id>/user/<user_id>", format = "application/json")]
-fn join_session(session_id: String,
-             user_id: String,
-             keys: APIKey,
-             pool: State<RedisPool>)
-             -> Result<()> {
-
-    let conn = pool.get().unwrap();
-
-    let u = user::User::lookup_strict(&user_id, &conn)?;
-    let s = session::Session::lookup_strict(&session_id, &conn)?;
-    if u.is_authorized(&keys) {
-        s.associate(&u.user_id, "user", &conn)?;
-        redisutil::update_session(&session_id, &conn)?;
-    } else {
-        bail!(ErrorKind::UserForbidden("Caller is not authorized for this user".to_owned()))
-    }
-    Ok(())
-}
 
 #[patch("/session/<session_id>/user/<user_id>", format = "application/json", data = "<vote>")]
 fn cast_vote(session_id: String,
@@ -194,82 +174,24 @@ fn cast_vote(session_id: String,
     }
 }
 
-#[delete("/session/<session_id>/user/<user_id>")]
-fn kick_user(session_id: String,
-               user_id: String,
-               keys: APIKey,
-               pool: State<RedisPool>)
-               -> Result<Option<()>> {
+#[delete("/user/<user_id>")]
+fn delete_user(user_id: String, keys: APIKey, pool: State<RedisPool>) -> Result<Option<()>> {
     let conn = pool.get().unwrap();
-
-    let u = match user::User::lookup(&user_id, &conn)? {
+    let mut u = match user::User::lookup(&user_id, &conn)? {
         Some(u) => u,
-        None => return Ok(None)
-    };
-    let s = session::Session::lookup_strict(&session_id, &conn)?;
-
-    // If the caller is either the user or a session admin
-    let authorized = if u.user_id == keys.user_id {
-        if u.is_authorized(&keys) {
-            true
-        } else {
-            false
-        }
-    } else {
-        // The Caller is not the user, so check the token to be sure its valid
-        if redisutil::check_token(&keys, &conn)? {
-            let admins = s.get_associates("admin", &conn)?;
-            if admins.contains(&keys.user_id) {
-                true
-            } else {
-                false
-            }
-        } else {
-            false
-        }
+        None => return Ok(None),
     };
 
-    if authorized {
-        s.disassociate(&user_id, "user", &conn)?;
-        redisutil::update_session(&session_id, &conn)?;
+    if u.is_authorized(&keys) {
+        u.delete(&conn)?;
         Ok(Some(()))
     } else {
-        bail!(ErrorKind::UserForbidden("Caller is not authorized to kick user".to_owned()))
+        bail!(ErrorKind::UserForbidden("Caller is not authorized to delete user".to_owned()))
     }
 }
 
-#[delete("/user/<user_id>")]
-fn delete_user(user_id: String,
-               keys: APIKey,
-               pool: State<RedisPool>)
-               -> Result<Option<()>> {
-    let conn = pool.get().unwrap();
-    Ok(Some(()))
-
-    // match user::User::lookup(&user_id, &conn)? {
-    //     Some(mut u) => {
-    //         if !u.is_authorized(&keys) {
-    //             let session_admin = match session::Session::lookup(&session_id, &conn)? {
-    //                 Some(s) => true,//s.is_authorized(&keys.session_key),
-    //                 None => false,
-    //             };
-    //             if !session_admin {
-    //                 bail!(ErrorKind::UserForbidden(
-    //                     "User is not authorized for this user".to_owned()
-    //                 ))
-    //             }
-    //         }
-    //         u.delete(&conn)?;
-    //         redisutil::update_session(&session_id, &conn)?;
-    //         Ok(Some(()))
-    //     }
-    //     None => Ok(None),
-    // }
-}
-
-// TODO remove the option, anyone creating a session should have a user
 #[post("/session")]
-fn create_session(pool: State<RedisPool>, o_keys: Option<APIKey>) -> Result<JSON<Value>> {
+fn create_session(pool: State<RedisPool>, keys: APIKey) -> Result<JSON<Value>> {
     let conn = pool.get().unwrap();
 
     let s = session::Session::new();
@@ -278,51 +200,118 @@ fn create_session(pool: State<RedisPool>, o_keys: Option<APIKey>) -> Result<JSON
         bail!("Tried to create a session with id that already exists!");
     }
 
-    if let Some(keys) = o_keys {
-        if redisutil::check_token(&keys, &conn)? {
-            s.associate(&keys.user_id, "admin", &conn)?;
-        }
+    if !redisutil::check_token(&keys, &conn)? {
+        bail!(ErrorKind::UserForbidden("Token invalid".to_owned()))
     }
 
+    s.associate(&keys.user_id, "admin", &conn)?;
     redisutil::save(&s, &conn)?;
     Ok(JSON(json!({
         "session_id": s.session_id,
     })))
 }
 
+#[post("/session/<session_id>/user/<user_id>", format = "application/json")]
+fn join_session(session_id: String,
+                user_id: String,
+                keys: APIKey,
+                pool: State<RedisPool>)
+                -> Result<()> {
+
+    let conn = pool.get().unwrap();
+
+    let u = user::User::lookup_strict(&user_id, &conn)?;
+    let s = session::Session::lookup_strict(&session_id, &conn)?;
+    if u.is_authorized(&keys) {
+        s.associate(&u.user_id, "user", &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+    } else {
+        bail!(ErrorKind::UserForbidden("Caller is not authorized for this user".to_owned()))
+    }
+    Ok(())
+}
+
+#[delete("/session/<session_id>/user/<user_id>")]
+fn kick_user(session_id: String,
+             user_id: String,
+             keys: APIKey,
+             pool: State<RedisPool>)
+             -> Result<Option<()>> {
+    let conn = pool.get().unwrap();
+
+    let u = match user::User::lookup(&user_id, &conn)? {
+        Some(u) => u,
+        None => return Ok(None),
+    };
+    let s = session::Session::lookup_strict(&session_id, &conn)?;
+
+    if u.is_authorized(&keys) || is_admin(&keys, &s, &conn)? {
+        s.disassociate(&user_id, "user", &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+        Ok(Some(()))
+    } else {
+        bail!(ErrorKind::UserForbidden("Caller is not authorized to kick user".to_owned()))
+    }
+}
+
+#[post("/session/<session_id>/admin/<user_id>", format = "application/json")]
+fn grant_admin(session_id: String,
+               user_id: String,
+               keys: APIKey,
+               pool: State<RedisPool>)
+               -> Result<()> {
+
+    let conn = pool.get().unwrap();
+
+    let u = user::User::lookup_strict(&user_id, &conn)?;
+    let s = session::Session::lookup_strict(&session_id, &conn)?;
+    if is_admin(&keys, &s, &conn)? {
+        s.associate(&u.user_id, "admin", &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+    } else {
+        bail!(ErrorKind::UserForbidden(
+            "User is not authorized as session admin".to_owned()
+        ))
+    }
+    Ok(())
+}
+
+#[delete("/session/<session_id>/admin/<user_id>")]
+fn revoke_admin(session_id: String,
+                user_id: String,
+                keys: APIKey,
+                pool: State<RedisPool>)
+                -> Result<Option<()>> {
+    let conn = pool.get().unwrap();
+
+    let s = session::Session::lookup_strict(&session_id, &conn)?;
+
+    if is_admin(&keys, &s, &conn)? {
+        s.disassociate(&user_id, "admin", &conn)?;
+        redisutil::update_session(&session_id, &conn)?;
+        Ok(Some(()))
+    } else {
+        bail!(ErrorKind::UserForbidden(
+            "User is not authorized as session admin".to_owned()
+        ))
+    }
+}
+
 #[get("/session/<session_id>")]
 fn lookup_session(session_id: String,
-                  keys: APIKey,
                   pool: State<RedisPool>)
                   -> Result<Option<JSON<session::PublicSession>>> {
     let conn = pool.get().unwrap();
 
-    let possible_session = session::Session::lookup(&session_id, &conn)?;
+    let s = match session::Session::lookup(&session_id, &conn)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
 
-    match possible_session {
-        Some(s) => {
-            let query_string = format!("{}_*", s.session_id);
-            let users = user::User::bulk_lookup(&query_string, &conn)?;
-            //let admins = s.get_associates("admins", &conn)?;
-            let admins = Vec::new();
-            let public_session = session::PublicSession::new(&s, &users, &admins);
-            let mut authorized = true;//s.is_authorized(&keys.session_key);
-            if !authorized {
-                for u in users {
-                    if u.is_authorized(&keys) {
-                        authorized = true;
-                        break;
-                    }
-                }
-            }
-            if authorized {
-                Ok(Some(JSON(public_session)))
-            } else {
-                bail!(ErrorKind::UserForbidden("User is not authorized for this user".to_owned()))
-            }
-        }
-        None => Ok(None),
-    }
+    let admin_ids = s.get_associates("admin", &conn)?;
+    let users = lookup_active_users(&s, &conn)?;
+    let public_session = session::PublicSession::new(&s, &users, &admin_ids);
+    Ok(Some(JSON(public_session)))
 }
 
 #[patch("/session/<session_id>", format = "application/json", data = "<state>")]
@@ -330,65 +319,83 @@ fn update_session(session_id: String,
                   state: JSON<SessionStateForm>,
                   keys: APIKey,
                   pool: State<RedisPool>)
-                  -> Result<()> {
+                  -> Result<Option<()>> {
     let conn = pool.get().unwrap();
 
-    match session::Session::lookup(&session_id, &conn)? {
-        Some(mut s) => {
-            if true {// !s.is_authorized(&keys.session_key) {
-                bail!(ErrorKind::UserForbidden(
-                    "User is not authorized as session admin".to_owned()
-                ))
-            }
-            let query_string = format!("{}_*", s.session_id);
-            let mut users = user::User::bulk_lookup(&query_string, &conn)?;
-            match state.0.state {
-                session::SessionState::Reset => s.reset(&mut users),
-                session::SessionState::Vote => s.clear(&mut users),
-                session::SessionState::Visible => s.take_votes(&mut users),
-                //TODO: This should be some 4xx error, maybe the same one if it couldn't be decoded
-                // Alternately, maybe there's some other task this can do?
-                session::SessionState::Dirty => {
-                    bail!(ErrorKind::UserError("Tried to set the state to 'Dirty'".to_owned()))
-                }
-            }
-            for u in users {
-                redisutil::save(&u, &conn)?;
-            }
-            redisutil::save(&s, &conn)?;
-            redisutil::update_session(&session_id, &conn)?;
-        }
-        None => bail!(ErrorKind::UserError("Tried to update a non-existent session!".to_owned())),
+    let mut s = match session::Session::lookup(&session_id, &conn)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+
+    if !is_admin(&keys, &s, &conn)? {
+        bail!(ErrorKind::UserForbidden(
+            "User is not authorized as session admin".to_owned()
+        ))
     }
-    Ok(())
+
+    let mut users = lookup_active_users(&s, &conn)?;
+    match state.0.state {
+        session::SessionState::Reset => s.reset(&mut users),
+        session::SessionState::Vote => s.clear(&mut users),
+        session::SessionState::Visible => s.take_votes(&mut users),
+        session::SessionState::Dirty => {
+            bail!(ErrorKind::UserError("Tried to set the state to 'Dirty'".to_owned()))
+        }
+    }
+    for u in users {
+        redisutil::save(&u, &conn)?;
+    }
+    redisutil::save(&s, &conn)?;
+    redisutil::update_session(&session_id, &conn)?;
+    Ok(Some(()))
 }
 
 #[delete("/session/<session_id>")]
 fn delete_session(session_id: String, keys: APIKey, pool: State<RedisPool>) -> Result<Option<()>> {
     let conn = pool.get().unwrap();
 
-    let possible_session = session::Session::lookup(&session_id, &conn)?;
-
-    let query_string = format!("{}_*", session_id);
-    let users = user::User::bulk_lookup(&query_string, &conn)?;
-
-    match possible_session {
-        Some(mut s) => {
-            if true {// !s.is_authorized(&keys.session_key) {
-                bail!(ErrorKind::UserForbidden(
-                    "User is not authorized as session admin".to_owned()
-                ))
-            }
-            for mut u in users {
-                u.delete(&conn)?
-            }
-            s.delete(&conn)?;
-            redisutil::update_session(&session_id, &conn)?;
-            Ok(Some(()))
-        }
-        None => Ok(None),
+    let mut s = match session::Session::lookup(&session_id, &conn)? {
+        Some(s) => s,
+        None => return Ok(None),
+    };
+    if !is_admin(&keys, &s, &conn)? {
+        bail!(ErrorKind::UserForbidden(
+            "User is not authorized as session admin".to_owned()
+        ))
     }
+    s.delete(&conn)?;
+    redisutil::update_session(&session_id, &conn)?;
+    Ok(Some(()))
 }
+
+fn is_admin(keys: &APIKey, session: &session::Session, conn: &redis::Connection) -> Result<bool> {
+    let authorized = if redisutil::check_token(&keys, &conn)? {
+        let admins = session.get_associates("admin", &conn)?;
+        // Make sure that the caller is one of the session admins
+        if admins.contains(&keys.user_id) {
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+    Ok(authorized)
+}
+
+pub fn lookup_active_users(session: &session::Session,
+                           conn: &redis::Connection)
+                           -> Result<Vec<user::User>> {
+    let user_ids = session.get_associates("user", &conn)?;
+    let user_ids_ref = user_ids.iter().map(|s| s.as_str()).collect();
+    let possible_users = user::User::bulk_lookup(user_ids_ref, &conn)?;
+    let users = possible_users.into_iter()
+        .filter(|u| u.is_some())
+        .map(|u| u.unwrap())
+        .collect();
+    Ok(users)
+}
+
 
 fn main() {
     let cpus = num_cpus::get() as u32;
@@ -411,11 +418,13 @@ fn main() {
             test,
             files,
             create_user,
-            join_session,
             cast_vote,
-            kick_user,
             delete_user,
             create_session,
+            join_session,
+            kick_user,
+            grant_admin,
+            revoke_admin,
             update_session,
             lookup_session,
             delete_session,

@@ -65,7 +65,8 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     }
 
     // TODO: Fill this in once we have users to test with
-    fn bulk_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>> {
+
+    fn pattern_lookup(pattern: &str, conn: &Connection) -> Result<Vec<Self>> {
         let redis_key = Self::redis_key(pattern);
         let values: Vec<Value> = conn.keys(redis_key)?;
         let results: Vec<Self> = values.iter()
@@ -77,6 +78,18 @@ pub trait RedisBackend: Sized + Decodable + Debug {
             })
             .collect::<Result<Vec<Self>>>()?;
 
+        Ok(results)
+    }
+
+    fn bulk_lookup(ids: Vec<&str>, conn: &Connection) -> Result<Vec<Option<Self>>> {
+        if ids.is_empty() {
+            return Ok(vec![]);
+        }
+        let redis_keys: Vec<String> = ids.iter().map(|user_id| Self::redis_key(user_id)).collect();
+        let values: Vec<Value> = conn.get(redis_keys)?;
+        let results: Vec<Option<Self>> = values.into_iter()
+            .map(|rv| Self::deserialize(rv))
+            .collect::<Result<_>>()?;
         Ok(results)
     }
 
