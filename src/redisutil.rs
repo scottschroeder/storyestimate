@@ -144,7 +144,7 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     fn get_associates(&self, relationship: &str, conn: &Connection) -> Result<Vec<String>> {
         let redis_key = self.unique_associate_key(relationship);
         let result: Value = conn.smembers(&redis_key)?;
-        info!("Associates({}) [{}]: {:?}",
+        debug!("Associates({}) [{}]: {:?}",
               self.object_id(),
               relationship,
               result);

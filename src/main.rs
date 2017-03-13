@@ -25,6 +25,8 @@ extern crate r2d2;
 extern crate r2d2_redis;
 extern crate num_cpus;
 
+use hyper::header::Basic;
+use std::str::FromStr;
 use std::path::PathBuf;
 use rocket::response::NamedFile;
 use rocket_contrib::{JSON, Value};
@@ -117,15 +119,7 @@ fn index() -> &'static str {
     "Hello, world!"
 }
 
-use hyper::header::Basic;
-use std::str::FromStr;
-
-#[get("/test")]
-fn test(keys: APIKey) -> Result<String> {
-    Ok(format!("{:?}", keys))
-}
-
-#[get("/static/<file..>")]
+#[get("/<file..>")]
 fn files(file: PathBuf) -> Result<Option<NamedFile>> {
     let fullpath = env::current_dir()
         ?
@@ -410,11 +404,10 @@ fn main() {
     let pool = r2d2::Pool::new(config, manager).unwrap();
 
     rocket::ignite()
-        .mount("/",
+        .mount("/", routes![index,])
+        .mount("/static", routes![files,])
+        .mount("/api",
                routes![
-            index,
-            test,
-            files,
             create_user,
             cast_vote,
             delete_user,
