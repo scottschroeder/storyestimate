@@ -136,9 +136,7 @@ fn files(file: PathBuf) -> Result<Option<NamedFile>> {
 }
 
 #[post("/user", format = "application/json", data = "<name>")]
-fn create_user(name: JSON<NameForm>,
-               pool: State<RedisPool>)
-               -> Result<JSON<Value>> {
+fn create_user(name: JSON<NameForm>, pool: State<RedisPool>) -> Result<JSON<Value>> {
     let conn = pool.get().unwrap();
 
     info!("Name Object: {:?}", name);

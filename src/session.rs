@@ -59,11 +59,13 @@ impl PublicSession {
             session_id: s.session_id.clone(),
             average: s.average.clone(),
             state: choose_session_state(users),
-            users: users.iter().map(|u| {
-                let mut public_user = PublicUser::from(u);
-                public_user.is_admin = admins.contains(&public_user.user_id);
-                public_user
-            }).collect(),
+            users: users.iter()
+                .map(|u| {
+                    let mut public_user = PublicUser::from(u);
+                    public_user.is_admin = admins.contains(&public_user.user_id);
+                    public_user
+                })
+                .collect(),
         }
     }
 }

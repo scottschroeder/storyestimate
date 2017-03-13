@@ -44,14 +44,17 @@ pub trait RedisBackend: Sized + Decodable + Debug {
     }
 
     fn redis_associate_key(id: &str, relationship: &str) -> String {
-        format!("se_associate_{}_{}_{}", Self::object_name(), id, relationship)
+        format!("se_associate_{}_{}_{}",
+                Self::object_name(),
+                id,
+                relationship)
     }
 
     fn lookup_strict(id: &str, conn: &Connection) -> Result<Self> {
         let redis_key = Self::redis_key(id);
         match Self::lookup_raw_key(&redis_key, conn)? {
             Some(x) => Ok(x),
-            None => Err(ErrorKind::RedisEmptyError(format!("Could not find {}", redis_key)).into())
+            None => Err(ErrorKind::RedisEmptyError(format!("Could not find {}", redis_key)).into()),
         }
     }
 
@@ -128,18 +131,22 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         let result: Value = conn.sadd(&redis_key, foreign)?;
         match result {
             Value::Int(_) => Ok(()),
-            _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
+            _ => {
+                bail!("Redis unable to publish, and did not report error: {:?}",
+                      result)
+            }
         }
     }
 
     fn get_associates(&self, relationship: &str, conn: &Connection) -> Result<Vec<String>> {
         let redis_key = self.unique_associate_key(relationship);
         let result: Value = conn.smembers(&redis_key)?;
-        info!("Associates: {:?}", result);
+        info!("Associates({}) [{}]: {:?}",
+              self.object_id(),
+              relationship,
+              result);
         match result {
-            Value::Bulk(value_vec) => {
-                Ok(String::from_redis_values(value_vec.as_slice())?)
-            },
+            Value::Bulk(value_vec) => Ok(String::from_redis_values(value_vec.as_slice())?),
             _ => bail!("Redis did not return expected set of strings: {:?}", result),
         }
     }
@@ -149,7 +156,10 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         let result: Value = conn.srem(&redis_key, foreign)?;
         match result {
             Value::Int(_) => Ok(()),
-            _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
+            _ => {
+                bail!("Redis unable to publish, and did not report error: {:?}",
+                      result)
+            }
         }
     }
 }
@@ -184,7 +194,10 @@ fn publish(channel: &str, msg: &str, conn: &Connection) -> Result<()> {
     let result = conn.publish(channel, msg)?;
     match result {
         Value::Int(_) => Ok(()),
-        _ => bail!("Redis unable to publish, and did not report error: {:?}", result),
+        _ => {
+            bail!("Redis unable to publish, and did not report error: {:?}",
+                  result)
+        }
     }
 }
 
