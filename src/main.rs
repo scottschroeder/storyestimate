@@ -135,6 +135,11 @@ fn create_user(name: Option<JSON<NameForm>>, pool: State<RedisPool>) -> Result<J
 
     info!("Name Object: {:?}", name);
     let u = user::User::new(name.as_ref().map(|form| form.0.name.as_str()));
+
+    if !u.is_clean(&conn)? {
+        // TODO: we should probably just retry a few times
+        bail!("Tried to create a user with id that already exists!");
+    }
     redisutil::save(&u, &conn)?;
 
     Ok(JSON(json!({
