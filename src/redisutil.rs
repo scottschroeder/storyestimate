@@ -89,7 +89,10 @@ pub trait RedisBackend: Sized + Decodable + Debug {
             return Ok(vec![]);
         }
         let redis_keys: Vec<String> = ids.iter().map(|user_id| Self::redis_key(user_id)).collect();
-        let values: Vec<Value> = conn.get(redis_keys)?;
+        let values: Vec<Value> = match conn.get(redis_keys)? {
+            Value::Bulk(x) => x,
+            x => vec![x],
+        };
         let results: Vec<Option<Self>> = values.into_iter()
             .map(|rv| Self::deserialize(rv))
             .collect::<Result<_>>()?;
