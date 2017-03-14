@@ -38,7 +38,7 @@
       if (url && url.length > 1) {
         url = decodeURIComponent(url[1]);
       } else {
-        url = "http://localhost/static/swagger.yaml";
+        url = "http://{{ hostname_port }}/docs/swagger.yaml";
       }
 
       hljs.configure({

@@ -4,10 +4,11 @@ info:
   description: Team story point estimates made easy!
   version: "0.0.1"
 # the domain of the service
-host: localhost
+host: "{{ hostname_port }}"
 # array of all schemes that your API supports
 schemes:
   - http
+  - https
 # will be prefixed to all paths
 basePath: /api
 consumes:

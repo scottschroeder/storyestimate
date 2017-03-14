@@ -29,10 +29,11 @@ use hyper::header::Basic;
 use std::str::FromStr;
 use std::path::PathBuf;
 use rocket::response::NamedFile;
-use rocket_contrib::{JSON, Value};
+use rocket_contrib::{JSON, Template, Value};
 use rocket::http::Status;
 use rocket::{Outcome, State};
 use rocket::request::{self, Request, FromRequest};
+use rocket::response::Redirect;
 
 use r2d2_redis::RedisConnectionManager;
 type RedisPool = r2d2::Pool<r2d2_redis::RedisConnectionManager>;
@@ -50,6 +51,10 @@ mod redisutil;
 use errors::*;
 use redisutil::RedisBackend;
 
+#[derive(Serialize)]
+struct HostInfo {
+    hostname_port: String,
+}
 
 #[derive(Serialize, Deserialize)]
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -74,6 +79,21 @@ struct NameForm {
 pub struct APIKey {
     user_id: String,
     user_key: Option<String>,
+}
+
+enum FileLike {
+    NamedFile(Option<NamedFile>),
+    Template(Option<Template>),
+}
+
+impl<'r> Responder<'r> for FileLike {
+    fn respond(self) -> std::result::Result<Response<'r>, Status> {
+        match self {
+            FileLike::NamedFile(file) => file.respond(),
+            FileLike::Template(file) => file.respond(),
+        }
+    }
+
 }
 
 impl<'a, 'r> FromRequest<'a, 'r> for APIKey {
@@ -117,6 +137,35 @@ impl<'r> Responder<'r> for Error {
 #[get("/")]
 fn index() -> &'static str {
     "Hello, world!"
+}
+
+#[get("/")]
+fn swagger_ui_home() -> Redirect {
+    Redirect::to("/docs/index.html")
+}
+
+#[get("/<file..>")]
+fn swagger_ui(file: PathBuf) -> Result<FileLike> {
+    let templates = vec![
+        "index.html",
+        "swagger.yaml",
+    ];
+    for t in templates {
+        if PathBuf::from(t) == file {
+            info!("Treating {:?} as a template", file.display());
+            let context = HostInfo {
+                hostname_port: "10.0.0.145".to_string(),
+            };
+            return Ok(FileLike::Template(Some(Template::render(t, &context))))
+        }
+    }
+    let fullpath = env::current_dir()?.join("swagger-ui/").join(file);
+    info!("Full Path is: {:?}", fullpath.display());
+    let flike = match NamedFile::open(fullpath).ok() {
+        Some(file) => FileLike::NamedFile(Some(file)),
+        None => FileLike::NamedFile(None)
+    };
+    Ok(flike)
 }
 
 #[get("/<file..>")]
@@ -441,6 +490,7 @@ fn main() {
     rocket::ignite()
         .mount("/", routes![index,])
         .mount("/static", routes![files,])
+        .mount("/docs", routes![swagger_ui_home, swagger_ui,])
         .mount("/api",
                routes![
             create_user,
