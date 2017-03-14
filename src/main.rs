@@ -165,7 +165,7 @@ fn swagger_ui(file: PathBuf) -> Result<FileLike> {
             return Ok(FileLike::Template(Some(Template::render(t, &context))))
         }
     }
-    let fullpath = env::current_dir()?.join("swagger-ui/").join(file);
+    let fullpath = env::current_dir()?.join("vendor/swagger-ui/").join(file);
     info!("Full Path is: {:?}", fullpath.display());
     let flike = match NamedFile::open(fullpath).ok() {
         Some(file) => FileLike::NamedFile(Some(file)),
