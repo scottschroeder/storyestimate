@@ -143,8 +143,7 @@ paths:
         Add a user to a session to participate in voting. The users nickname will show
         up as part of the session, and any votes will be counted.
       tags:
-        - User
-        - Session
+        - Control
       parameters:
         - $ref: '#/parameters/SessionID'
         - $ref: '#/parameters/UserID'
@@ -165,8 +164,7 @@ paths:
         - $ref: '#/parameters/UserID'
         - $ref: '#/parameters/UserVotePatch'
       tags:
-        - User
-        - Session
+        - Control
       responses:
         200:
           description: Success
@@ -186,8 +184,7 @@ paths:
         - $ref: '#/parameters/SessionID'
         - $ref: '#/parameters/UserID'
       tags:
-        - User
-        - Session
+        - Control
       responses:
         200:
           description: Success
@@ -205,8 +202,7 @@ paths:
         Grant a user admin privileges on a session. This can only be performed by
         current admins of the session.
       tags:
-        - User
-        - Session
+        - Control
       parameters:
         - $ref: '#/parameters/SessionID'
         - $ref: '#/parameters/UserID'
@@ -228,8 +224,7 @@ paths:
         - $ref: '#/parameters/SessionID'
         - $ref: '#/parameters/UserID'
       tags:
-        - User
-        - Session
+        - Control
       responses:
         200:
           description: Success
