@@ -153,9 +153,15 @@ fn swagger_ui(file: PathBuf) -> Result<FileLike> {
     for t in templates {
         if PathBuf::from(t) == file {
             info!("Treating {:?} as a template", file.display());
+
+            let config = rocket::config::active().ok_or(rocket::config::ConfigError::NotFound)?;
             let context = HostInfo {
-                hostname_port: "10.0.0.145".to_string(),
+                hostname_port: match config.get_str("userhost") {
+                    Ok(userhost) => userhost.to_string(),
+                    Err(_) => format!("{}:{}", config.address, config.port),
+                }
             };
+            info!("Template {} for user host", context.hostname_port);
             return Ok(FileLike::Template(Some(Template::render(t, &context))))
         }
     }

@@ -2,6 +2,7 @@ use rustc_serialize;
 use redis::{self, RedisError};
 use std::io;
 use hyper::error::Error as HyperError;
+use rocket::config::ConfigError;
 
 
 impl From<Error> for RedisError {
@@ -17,6 +18,7 @@ error_chain! {
         RedisError(RedisError);
         IOError(io::Error);
         HyperError(HyperError);
+        RocketConfigError(ConfigError);
     }
     errors {
         RedisEmptyError(t: String) {
