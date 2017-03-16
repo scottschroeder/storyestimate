@@ -127,8 +127,14 @@ impl<'r, R: Responder<'r>> Responder<'r> for CORS<R> {
             let headers: Vec<_> = self.expose_headers.into_iter().collect();
             let headers = headers.join(", ");
 
-            response.set_raw_header("Access-Control-Allow-Headers", headers.clone());
             response.set_raw_header("Access-Control-Expose-Headers", headers);
+        }
+
+        if !self.allow_headers.is_empty() {
+            let headers: Vec<_> = self.allow_headers.into_iter().collect();
+            let headers = headers.join(", ");
+
+            response.set_raw_header("Access-Control-Allow-Headers", headers);
         }
 
         if !self.allow_methods.is_empty() {

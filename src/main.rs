@@ -499,8 +499,10 @@ fn cors_preflight(whatever: PathBuf) -> PreflightCORS {
         ])
         .headers(&vec![
             "Content-Type",
-            "origin",
-            "accept",
+            "Origin",
+            "Accept",
+            "Authorization",
+            "X-Requested-With",
         ])
 }
 
