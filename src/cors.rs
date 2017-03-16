@@ -127,6 +127,7 @@ impl<'r, R: Responder<'r>> Responder<'r> for CORS<R> {
             let headers: Vec<_> = self.expose_headers.into_iter().collect();
             let headers = headers.join(", ");
 
+            response.set_raw_header("Access-Control-Allow-Headers", headers.clone());
             response.set_raw_header("Access-Control-Expose-Headers", headers);
         }
 

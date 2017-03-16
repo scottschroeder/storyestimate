@@ -497,7 +497,11 @@ fn cors_preflight(whatever: PathBuf) -> PreflightCORS {
             Method::Connect,
             Method::Patch,
         ])
-        .headers(&vec!["Content-Type"])
+        .headers(&vec![
+            "Content-Type",
+            "origin",
+            "accept",
+        ])
 }
 
 #[error(400)]
