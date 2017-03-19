@@ -43,6 +43,7 @@ type RedisPool = r2d2::Pool<r2d2_redis::RedisConnectionManager>;
 extern crate serde_derive;
 use std::env;
 
+mod apikey;
 mod cors;
 mod user;
 mod session;
@@ -53,6 +54,7 @@ mod redisutil;
 use cors::{CORS, PreflightCORS};
 use errors::*;
 use redisutil::RedisBackend;
+use apikey::APIKey;
 
 #[derive(Serialize)]
 struct HostInfo {
@@ -77,12 +79,6 @@ struct NameForm {
     name: String,
 }
 
-#[derive(Serialize, Deserialize)]
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct APIKey {
-    user_id: String,
-    user_key: Option<String>,
-}
 
 enum FileLike {
     NamedFile(Option<NamedFile>),
@@ -95,28 +91,6 @@ impl<'r> Responder<'r> for FileLike {
             FileLike::NamedFile(file) => file.respond(),
             FileLike::Template(file) => file.respond(),
         }
-    }
-}
-
-impl<'a, 'r> FromRequest<'a, 'r> for APIKey {
-    type Error = ();
-
-    fn from_request(request: &'a Request<'r>) -> request::Outcome<APIKey, ()> {
-        let user_auth: String = match request.headers().get_one("Authorization") {
-            Some(auth_data) => auth_data.to_string(),
-            None => return Outcome::Failure((Status::Unauthorized, ())),
-        };
-
-        let base64_encoded_auth = user_auth.replace("Basic ", "");
-        let authdata: Basic = match Basic::from_str(&base64_encoded_auth) {
-            Ok(authdata) => authdata,
-            Err(_) => return Outcome::Failure((Status::Unauthorized, ())),
-        };
-        //Ok(format!("{:?} -> {:?}", keys, authdata))
-        Outcome::Success(APIKey {
-            user_id: authdata.username,
-            user_key: authdata.password,
-        })
     }
 }
 
