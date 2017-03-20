@@ -7,8 +7,7 @@ info:
 host: "{{ hostname_port }}"
 # array of all schemes that your API supports
 schemes:
-  - http
-  - https
+  - {{ scheme }}
 # will be prefixed to all paths
 basePath: /api
 consumes:

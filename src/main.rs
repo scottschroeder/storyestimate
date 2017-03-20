@@ -25,16 +25,15 @@ extern crate r2d2;
 extern crate r2d2_redis;
 extern crate num_cpus;
 
-use hyper::header::Basic;
-use std::str::FromStr;
 use std::path::PathBuf;
 use rocket::response::NamedFile;
 use rocket_contrib::{JSON, Template, Value};
 use rocket::http::Method;
 use rocket::http::Status;
-use rocket::{Outcome, State};
-use rocket::request::{self, Request, FromRequest};
+use rocket::State;
+use rocket::request::Request;
 use rocket::response::Redirect;
+use rocket::config::ConfigError;
 
 use r2d2_redis::RedisConnectionManager;
 type RedisPool = r2d2::Pool<r2d2_redis::RedisConnectionManager>;
@@ -45,20 +44,25 @@ use std::env;
 
 mod apikey;
 mod cors;
-mod user;
-mod session;
 mod errors;
 mod generator;
+mod proxydata;
 mod redisutil;
+mod session;
+mod user;
 
 use cors::{CORS, PreflightCORS};
 use errors::*;
 use redisutil::RedisBackend;
 use apikey::APIKey;
+use proxydata::ProxyData;
+
+const SWAGGER_DEFAULT_DIR: &'static str = "vendor/swagger-ui";
 
 #[derive(Serialize)]
 struct HostInfo {
     hostname_port: String,
+    scheme: String,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -121,24 +125,32 @@ fn swagger_ui_home() -> Redirect {
 }
 
 #[get("/<file..>")]
-fn swagger_ui(file: PathBuf) -> Result<CORS<FileLike>> {
+fn swagger_ui(file: PathBuf, http_data: ProxyData) -> Result<CORS<FileLike>> {
     let templates = vec!["index.html", "swagger.yaml"];
     for t in templates {
         if PathBuf::from(t) == file {
             info!("Treating {:?} as a template", file.display());
 
-            let config = rocket::config::active().ok_or(rocket::config::ConfigError::NotFound)?;
+
             let context = HostInfo {
-                hostname_port: match config.get_str("userhost") {
-                    Ok(userhost) => userhost.to_string(),
-                    Err(_) => format!("{}:{}", config.address, config.port),
-                },
+                hostname_port: http_data.http_host,
+                scheme: http_data.scheme,
             };
             info!("Template {} for user host", context.hostname_port);
             return Ok(FileLike::Template(Some(Template::render(t, &context))).into());
         }
     }
-    let fullpath = env::current_dir()?.join("vendor/swagger-ui/").join(file);
+    let config = rocket::config::active().ok_or(rocket::config::ConfigError::NotFound)?;
+    let swagger_dir: PathBuf = match config.get_str("swagger_dir") {
+        Ok(dir_str) => PathBuf::from(dir_str),
+        Err(ConfigError::NotFound) => env::current_dir()?.join(SWAGGER_DEFAULT_DIR),
+        Err(e) => {
+            warn!("Bad config value for 'swagger_dir': {:?}", e);
+            bail!(e);
+        }
+    };
+
+    let fullpath = swagger_dir.join(file);
     info!("Full Path is: {:?}", fullpath.display());
     let flike = match NamedFile::open(fullpath).ok() {
         Some(file) => FileLike::NamedFile(Some(file)),

@@ -1,2 +1,5 @@
 target/
+build/
+.vagrant/*
+VERSION
 **/*.rs.bk
