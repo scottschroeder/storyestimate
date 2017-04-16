@@ -174,6 +174,7 @@ pub trait RedisBackend: Sized + Decodable + Debug {
         }
     }
 }
+/*
 
 // This magic is "Higher Rank Trait Bounds": https://doc.rust-lang.org/nomicon/hrtb.html
 
@@ -215,3 +216,4 @@ fn publish(channel: &str, msg: &str, conn: &Connection) -> Result<()> {
 pub fn update_session(session_id: &str, conn: &Connection) -> Result<()> {
     publish("se_session_update", session_id, conn)
 }
+*/

@@ -2,4 +2,5 @@ target/
 build/
 .vagrant/*
 VERSION
+RUSTC_VERSION
 **/*.rs.bk

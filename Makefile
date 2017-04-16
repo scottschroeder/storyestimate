@@ -4,6 +4,7 @@ CARGO = cargo
 CARGO_OPTS =
 
 VERSION=$(shell grep -Em1 "^version" Cargo.toml | sed -r 's/.*"(.*)".*/\1/')
+RUSTC_VERSION=$(shell rustc -V)
 NAME := story-estimates
 BUILD_DIR := ./build
 
@@ -18,15 +19,14 @@ all: deb
 deb: $(BUILD_DIR)/$(NAME)_$(VERSION)_all.deb
 
 version:
-	echo "$(VERSION)" > VERSION
+	echo "$(RUSTC_VERSION)" > RUSTC_VERSION
 
 build:
-	$(CARGO) $(CARGO_OPTS) build --release
+	$(CARGO) $(CARGO_OPTS) build --release --features redis_estimates
 
 clean:
-	rm -fv $(BUILD_DIR)/$(NAME)_*_all.deb
+	rm -fv $(BUILD_DIR)/$(NAME)_*_all.deb RUSTC_VERSION
 	$(CARGO) $(CARGO_OPTS) clean
-	rm -rfv $(STAGING_DIR)
 
-$(BUILD_DIR)/$(NAME)_$(VERSION)_all.deb: build
+$(BUILD_DIR)/$(NAME)_$(VERSION)_all.deb: build version
 	./fpm_build.sh $(VERSION)

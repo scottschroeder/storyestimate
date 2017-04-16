@@ -31,3 +31,4 @@ fpm --verbose --force -s dir -t deb -n "${NAME}" -v "${DEB_VERSION}" --deb-user 
     vendor/swagger-ui=/opt/storyestimates/ \
     config/nginx/storyestimates.conf=/opt/storyestimates/config/nginx/ \
     config/Rocket.toml=/opt/storyestimates/config/ \
+    RUSTC_VERSION=/opt/storyestimates/ \
